@@ -2,6 +2,7 @@ package sirkel_repository
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,19 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func testUUID(t *testing.T) string {
+	t.Helper()
+
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatalf("unable to generate uuid: %v", err)
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
 
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -102,6 +116,7 @@ func mustSaveProject(t *testing.T, handler *ProjectsRepositoryHandler, organizat
 	t.Helper()
 
 	project := &sirkel_domain.Project{
+		ID:             testUUID(t),
 		OrganizationID: organizationID,
 		Name:           name,
 		Description:    "test description",
@@ -119,7 +134,9 @@ func TestProjectsRepositoryHandler_SaveProject_Insert(t *testing.T) {
 	organizationID := createTestOrganization(t, pool)
 	handler := NewProjectsRepositoryHandler(context.Background(), pool, nil)
 
+	id := testUUID(t)
 	project := &sirkel_domain.Project{
+		ID:             id,
 		OrganizationID: organizationID,
 		Name:           "Launch",
 		Description:    "Ship it",
@@ -130,8 +147,8 @@ func TestProjectsRepositoryHandler_SaveProject_Insert(t *testing.T) {
 		t.Fatalf("SaveProject() error = %v", err)
 	}
 
-	if project.ID == "" {
-		t.Fatal("expected project ID to be set after insert")
+	if project.ID != id {
+		t.Fatalf("expected project ID to remain %q, got %q", id, project.ID)
 	}
 	if project.CreatedAt.IsZero() {
 		t.Fatal("expected created_at to be set after insert")

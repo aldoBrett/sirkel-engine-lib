@@ -47,22 +47,17 @@ func (h *ProjectsRepositoryHandler) SaveProject(project *sirkel_domain.Project) 
 		project.OrganizationID = h.user.OrganizationID
 	}
 
-	if project.ID == "" {
-		return h.pool.QueryRow(h.ctx, `
-			INSERT INTO sirkel_engine.projects (organization_id, name, description, state)
-			VALUES ($1, $2, $3, $4)
-			RETURNING id, created_at, updated_at
-		`, project.OrganizationID, project.Name, project.Description, project.State,
-		).Scan(&project.ID, &project.CreatedAt, &project.UpdatedAt)
-	}
-
 	return h.pool.QueryRow(h.ctx, `
-		UPDATE sirkel_engine.projects
-		SET name = $1, description = $2, state = $3, updated_at = now()
-		WHERE id = $4
-		RETURNING updated_at
-	`, project.Name, project.Description, project.State, project.ID,
-	).Scan(&project.UpdatedAt)
+		INSERT INTO sirkel_engine.projects (id, organization_id, name, description, state)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO UPDATE
+		SET name = EXCLUDED.name,
+			description = EXCLUDED.description,
+			state = EXCLUDED.state,
+			updated_at = now()
+		RETURNING created_at, updated_at
+	`, project.ID, project.OrganizationID, project.Name, project.Description, project.State,
+	).Scan(&project.CreatedAt, &project.UpdatedAt)
 }
 
 func (h *ProjectsRepositoryHandler) GetProjects(params *GetProjectsParams) ([]*sirkel_domain.Project, error) {
