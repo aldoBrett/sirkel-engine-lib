@@ -44,22 +44,17 @@ func NewTaskItemsRepositoryHandler(ctx context.Context, pool *pgxpool.Pool, user
 }
 
 func (h *TaskItemsRepositoryHandler) SaveTaskItem(taskItem *sirkel_domain.TaskItem) error {
-	if taskItem.ID == "" {
-		return h.pool.QueryRow(h.ctx, `
-			INSERT INTO sirkel_engine.task_items (task_id, name, description, state)
-			VALUES ($1, $2, $3, $4)
-			RETURNING id, created_at, updated_at
-		`, taskItem.TaskID, taskItem.Name, taskItem.Description, taskItem.State,
-		).Scan(&taskItem.ID, &taskItem.CreatedAt, &taskItem.UpdatedAt)
-	}
-
 	return h.pool.QueryRow(h.ctx, `
-		UPDATE sirkel_engine.task_items
-		SET name = $1, description = $2, state = $3, updated_at = now()
-		WHERE id = $4
-		RETURNING updated_at
-	`, taskItem.Name, taskItem.Description, taskItem.State, taskItem.ID,
-	).Scan(&taskItem.UpdatedAt)
+		INSERT INTO sirkel_engine.task_items (id, task_id, name, description, state)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO UPDATE
+		SET name = EXCLUDED.name,
+			description = EXCLUDED.description,
+			state = EXCLUDED.state,
+			updated_at = now()
+		RETURNING created_at, updated_at
+	`, taskItem.ID, taskItem.TaskID, taskItem.Name, taskItem.Description, taskItem.State,
+	).Scan(&taskItem.CreatedAt, &taskItem.UpdatedAt)
 }
 
 func (h *TaskItemsRepositoryHandler) GetTaskItems(params *GetTaskItemsParams) ([]*sirkel_domain.TaskItem, error) {
