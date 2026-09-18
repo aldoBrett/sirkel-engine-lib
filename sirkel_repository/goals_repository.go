@@ -44,22 +44,17 @@ func NewGoalsRepositoryHandler(ctx context.Context, pool *pgxpool.Pool, user *si
 }
 
 func (h *GoalsRepositoryHandler) SaveGoal(goal *sirkel_domain.Goal) error {
-	if goal.ID == "" {
-		return h.pool.QueryRow(h.ctx, `
-			INSERT INTO sirkel_engine.goals (project_id, name, description, state)
-			VALUES ($1, $2, $3, $4)
-			RETURNING id, created_at, updated_at
-		`, goal.ProjectID, goal.Name, goal.Description, goal.State,
-		).Scan(&goal.ID, &goal.CreatedAt, &goal.UpdatedAt)
-	}
-
 	return h.pool.QueryRow(h.ctx, `
-		UPDATE sirkel_engine.goals
-		SET name = $1, description = $2, state = $3, updated_at = now()
-		WHERE id = $4
-		RETURNING updated_at
-	`, goal.Name, goal.Description, goal.State, goal.ID,
-	).Scan(&goal.UpdatedAt)
+		INSERT INTO sirkel_engine.goals (id, project_id, name, description, state)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO UPDATE
+		SET name = EXCLUDED.name,
+			description = EXCLUDED.description,
+			state = EXCLUDED.state,
+			updated_at = now()
+		RETURNING created_at, updated_at
+	`, goal.ID, goal.ProjectID, goal.Name, goal.Description, goal.State,
+	).Scan(&goal.CreatedAt, &goal.UpdatedAt)
 }
 
 func (h *GoalsRepositoryHandler) GetGoals(params *GetGoalsParams) ([]*sirkel_domain.Goal, error) {

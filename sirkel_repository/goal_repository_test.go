@@ -19,6 +19,7 @@ func mustSaveGoal(t *testing.T, handler *GoalsRepositoryHandler, projectID, name
 
 	description := "test description"
 	goal := &sirkel_domain.Goal{
+		ID:          testUUID(t),
 		ProjectID:   projectID,
 		Name:        name,
 		Description: &description,
@@ -37,8 +38,10 @@ func TestGoalsRepositoryHandler_SaveGoal_Insert(t *testing.T) {
 	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
 	handler := NewGoalsRepositoryHandler(context.Background(), pool, nil)
 
+	id := testUUID(t)
 	description := "Reach the moon"
 	goal := &sirkel_domain.Goal{
+		ID:          id,
 		ProjectID:   project.ID,
 		Name:        "Moonshot",
 		Description: &description,
@@ -49,8 +52,8 @@ func TestGoalsRepositoryHandler_SaveGoal_Insert(t *testing.T) {
 		t.Fatalf("SaveGoal() error = %v", err)
 	}
 
-	if goal.ID == "" {
-		t.Fatal("expected goal ID to be set after insert")
+	if goal.ID != id {
+		t.Fatalf("expected goal ID to remain %q, got %q", id, goal.ID)
 	}
 	if goal.CreatedAt.IsZero() {
 		t.Fatal("expected created_at to be set after insert")
@@ -97,6 +100,7 @@ func TestGoalsRepositoryHandler_SaveGoal_NullDescription(t *testing.T) {
 	handler := NewGoalsRepositoryHandler(context.Background(), pool, nil)
 
 	goal := &sirkel_domain.Goal{
+		ID:        testUUID(t),
 		ProjectID: project.ID,
 		Name:      "No description",
 		State:     sirkel_domain.GoalStateActive,
