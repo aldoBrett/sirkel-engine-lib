@@ -1,0 +1,36 @@
+version: "3.8"
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sirkel_test_db
+    environment:
+      POSTGRES_DB: sirkel_test_db
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secretpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d sirkel_test_db"]
+      interval: 5s
+      timeout: 5s
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: sirkel_test_app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://admin:secretpassword@db:5432/sirkel_test_db
+      # This database is of the flowy-admin-api project
+      # DATABASE_URL: postgres://admin:secretpassword@host.docker.internal:5432/flowy_main_test_db?sslmode=disable
+      # DATABASE_URL: postgresql://m_garcia:a4Q3loTzbBl0ca0GSHqrGEirDJJRUcnq@dpg-d4qcj849c44c73baps60-a.oregon-postgres.render.com/admin_dev
+      TEST_ENV: true
+    volumes:
+      - .:/app
+
+volumes:
+  pgdata:
