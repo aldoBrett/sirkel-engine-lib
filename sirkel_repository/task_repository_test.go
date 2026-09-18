@@ -19,6 +19,7 @@ func mustSaveTask(t *testing.T, handler *TasksRepositoryHandler, goalID, name st
 
 	description := "test description"
 	task := &sirkel_domain.Task{
+		ID:          testUUID(t),
 		GoalID:      goalID,
 		Name:        name,
 		Description: &description,
@@ -38,8 +39,10 @@ func TestTasksRepositoryHandler_SaveTask_Insert(t *testing.T) {
 	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
 	handler := NewTasksRepositoryHandler(context.Background(), pool, nil)
 
+	id := testUUID(t)
 	description := "Assemble the rocket"
 	task := &sirkel_domain.Task{
+		ID:          id,
 		GoalID:      goal.ID,
 		Name:        "Assembly",
 		Description: &description,
@@ -50,8 +53,8 @@ func TestTasksRepositoryHandler_SaveTask_Insert(t *testing.T) {
 		t.Fatalf("SaveTask() error = %v", err)
 	}
 
-	if task.ID == "" {
-		t.Fatal("expected task ID to be set after insert")
+	if task.ID != id {
+		t.Fatalf("expected task ID to remain %q, got %q", id, task.ID)
 	}
 	if task.CreatedAt.IsZero() {
 		t.Fatal("expected created_at to be set after insert")
@@ -100,6 +103,7 @@ func TestTasksRepositoryHandler_SaveTask_NullDescription(t *testing.T) {
 	handler := NewTasksRepositoryHandler(context.Background(), pool, nil)
 
 	task := &sirkel_domain.Task{
+		ID:     testUUID(t),
 		GoalID: goal.ID,
 		Name:   "No description",
 		State:  sirkel_domain.TaskStateTodo,
