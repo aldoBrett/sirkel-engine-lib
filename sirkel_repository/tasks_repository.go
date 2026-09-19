@@ -29,13 +29,6 @@ type TasksRepository interface {
 	GetTaskByID(taskID *string) (*sirkel_domain.Task, error)
 }
 
-var taskItemStatesInOrder = []sirkel_domain.TaskItemState{
-	sirkel_domain.TaskItemStatePending,
-	sirkel_domain.TaskItemStateInProgress,
-	sirkel_domain.TaskItemStateDone,
-	sirkel_domain.TaskItemStateCancelled,
-}
-
 type TasksRepositoryHandler struct {
 	ctx  context.Context
 	pool *pgxpool.Pool
@@ -116,16 +109,16 @@ func lockTask(ctx context.Context, tx pgx.Tx, taskID string) (*sirkel_domain.Tas
 func taskChanges(previous, task *sirkel_domain.Task) []fieldChange {
 	if previous == nil {
 		return changedFields(
-			fieldChange{"state", nil, strPtr(string(task.State))},
-			fieldChange{"responsible_user_id", nil, task.ResponsibleUserID},
+			fieldChange{sirkel_domain.TaskEventFieldState, nil, strPtr(string(task.State))},
+			fieldChange{sirkel_domain.TaskEventFieldResponsibleUserID, nil, task.ResponsibleUserID},
 		)
 	}
 
 	return changedFields(
-		fieldChange{"name", strPtr(previous.Name), strPtr(task.Name)},
-		fieldChange{"description", previous.Description, task.Description},
-		fieldChange{"state", strPtr(string(previous.State)), strPtr(string(task.State))},
-		fieldChange{"responsible_user_id", previous.ResponsibleUserID, task.ResponsibleUserID},
+		fieldChange{sirkel_domain.TaskEventFieldName, strPtr(previous.Name), strPtr(task.Name)},
+		fieldChange{sirkel_domain.TaskEventFieldDescription, previous.Description, task.Description},
+		fieldChange{sirkel_domain.TaskEventFieldState, strPtr(string(previous.State)), strPtr(string(task.State))},
+		fieldChange{sirkel_domain.TaskEventFieldResponsibleUserID, previous.ResponsibleUserID, task.ResponsibleUserID},
 	)
 }
 
@@ -196,7 +189,7 @@ func (h *TasksRepositoryHandler) GetTasksForIndex(params *GetTasksParams) ([]*si
 	countsByTask := make(map[string]map[sirkel_domain.TaskItemState]int, len(tasks))
 	for i, task := range tasks {
 		taskIDs[i] = task.ID
-		countsByTask[task.ID] = make(map[sirkel_domain.TaskItemState]int, len(taskItemStatesInOrder))
+		countsByTask[task.ID] = make(map[sirkel_domain.TaskItemState]int, len(sirkel_domain.TaskItemStates))
 	}
 
 	rows, err := h.pool.Query(h.ctx, `
@@ -225,8 +218,8 @@ func (h *TasksRepositoryHandler) GetTasksForIndex(params *GetTasksParams) ([]*si
 
 	tasksForIndex := make([]*sirkel_domain.TaskForIndex, len(tasks))
 	for i, task := range tasks {
-		stateCounts := make([]sirkel_domain.TaskItemStateCount, len(taskItemStatesInOrder))
-		for j, state := range taskItemStatesInOrder {
+		stateCounts := make([]sirkel_domain.TaskItemStateCount, len(sirkel_domain.TaskItemStates))
+		for j, state := range sirkel_domain.TaskItemStates {
 			stateCounts[j] = sirkel_domain.TaskItemStateCount{State: state, Count: countsByTask[task.ID][state]}
 		}
 		tasksForIndex[i] = &sirkel_domain.TaskForIndex{Task: *task, TaskItemStateCounts: stateCounts}

@@ -114,16 +114,16 @@ func lockTaskItem(ctx context.Context, tx pgx.Tx, taskItemID string) (*sirkel_do
 func taskItemChanges(previous, taskItem *sirkel_domain.TaskItem) []fieldChange {
 	if previous == nil {
 		return changedFields(
-			fieldChange{"state", nil, strPtr(string(taskItem.State))},
-			fieldChange{"assigned_user_id", nil, taskItem.AssignedUserID},
+			fieldChange{sirkel_domain.TaskEventFieldState, nil, strPtr(string(taskItem.State))},
+			fieldChange{sirkel_domain.TaskEventFieldAssignedUserID, nil, taskItem.AssignedUserID},
 		)
 	}
 
 	return changedFields(
-		fieldChange{"name", strPtr(previous.Name), strPtr(taskItem.Name)},
-		fieldChange{"description", previous.Description, taskItem.Description},
-		fieldChange{"state", strPtr(string(previous.State)), strPtr(string(taskItem.State))},
-		fieldChange{"assigned_user_id", previous.AssignedUserID, taskItem.AssignedUserID},
+		fieldChange{sirkel_domain.TaskEventFieldName, strPtr(previous.Name), strPtr(taskItem.Name)},
+		fieldChange{sirkel_domain.TaskEventFieldDescription, previous.Description, taskItem.Description},
+		fieldChange{sirkel_domain.TaskEventFieldState, strPtr(string(previous.State)), strPtr(string(taskItem.State))},
+		fieldChange{sirkel_domain.TaskEventFieldAssignedUserID, previous.AssignedUserID, taskItem.AssignedUserID},
 	)
 }
 

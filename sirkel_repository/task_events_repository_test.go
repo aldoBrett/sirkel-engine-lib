@@ -293,3 +293,116 @@ func TestTaskItemsRepositoryHandler_SaveTaskItem_RecordsCreationWithAssignee(t *
 	assertEvent(t, events[1], "state", nil, strPtr("pending"), creator.ID)
 	assertEvent(t, events[2], "assigned_user_id", nil, &assignee.ID, creator.ID)
 }
+
+func TestTaskEventsRepositoryHandler_GetTaskEvents(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	creator := createTestUser(t, pool, organizationID)
+	editor := createTestUser(t, pool, organizationID)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+	handler := NewTaskEventsRepositoryHandler(context.Background(), pool, nil)
+
+	task := mustSaveTask(t, NewTasksRepositoryHandler(context.Background(), pool, creator), goal.ID, "Assembly", sirkel_domain.TaskStateTodo)
+	taskItem := mustSaveTaskItem(t, NewTaskItemsRepositoryHandler(context.Background(), pool, creator), task.ID, "Bolt", sirkel_domain.TaskItemStatePending)
+
+	task.Name = "Assembly v2"
+	task.State = sirkel_domain.TaskStateInProgress
+	if err := NewTasksRepositoryHandler(context.Background(), pool, editor).SaveTask(task); err != nil {
+		t.Fatalf("SaveTask() update error = %v", err)
+	}
+	taskItem.State = sirkel_domain.TaskItemStateDone
+	if err := NewTaskItemsRepositoryHandler(context.Background(), pool, editor).SaveTaskItem(taskItem); err != nil {
+		t.Fatalf("SaveTaskItem() update error = %v", err)
+	}
+
+	// Another task's history must never show up.
+	otherTask := mustSaveTask(t, NewTasksRepositoryHandler(context.Background(), pool, creator), goal.ID, "Other", sirkel_domain.TaskStateTodo)
+
+	// Task creation, item creation, then the task's name and state, then the item's state.
+	chronological := getTaskEvents(t, pool, task.ID)
+	assertEventCount(t, chronological, 5)
+
+	events, err := handler.GetTaskEvents(&GetTaskEventsParams{TaskID: &task.ID})
+	if err != nil {
+		t.Fatalf("GetTaskEvents() error = %v", err)
+	}
+	if len(events) != 5 {
+		t.Fatalf("expected 5 events for the task and its item, got %d", len(events))
+	}
+	for i, event := range events {
+		want := chronological[len(chronological)-1-i]
+		if event.TaskID != task.ID || string(event.Field) != want.Field || !equalStrings(event.NewValue, want.NewValue) {
+			t.Fatalf("event %d: expected newest first (%s -> %s), got %+v", i, want.Field, describeValue(want.NewValue), event)
+		}
+		if event.ChangedAt.IsZero() || event.ID == 0 {
+			t.Fatalf("expected id and changed_at to be set, got %+v", event)
+		}
+	}
+	assertUserID(t, "changed_by", events[0].ChangedBy, editor.ID)
+	if events[0].TaskItemID == nil || *events[0].TaskItemID != taskItem.ID {
+		t.Fatalf("expected the newest event to belong to the task item, got %v", events[0].TaskItemID)
+	}
+
+	count, err := handler.CountTaskEvents(&CountTaskEventsParams{TaskID: &task.ID})
+	if err != nil {
+		t.Fatalf("CountTaskEvents() error = %v", err)
+	}
+	if count != 5 {
+		t.Fatalf("expected count 5, got %d", count)
+	}
+
+	itemEvents, err := handler.GetTaskEvents(&GetTaskEventsParams{TaskItemID: &taskItem.ID})
+	if err != nil {
+		t.Fatalf("GetTaskEvents() by task item error = %v", err)
+	}
+	if len(itemEvents) != 2 {
+		t.Fatalf("expected 2 events for the task item, got %d", len(itemEvents))
+	}
+	for _, event := range itemEvents {
+		if event.TaskItemID == nil || *event.TaskItemID != taskItem.ID {
+			t.Fatalf("expected only events of task item %q, got %+v", taskItem.ID, event)
+		}
+	}
+
+	field := sirkel_domain.TaskEventFieldState
+	stateEvents, err := handler.GetTaskEvents(&GetTaskEventsParams{TaskID: &task.ID, Field: &field})
+	if err != nil {
+		t.Fatalf("GetTaskEvents() by field error = %v", err)
+	}
+	if len(stateEvents) != 4 {
+		t.Fatalf("expected 4 state events, got %d", len(stateEvents))
+	}
+	stateCount, err := handler.CountTaskEvents(&CountTaskEventsParams{TaskID: &task.ID, Field: &field})
+	if err != nil {
+		t.Fatalf("CountTaskEvents() by field error = %v", err)
+	}
+	if stateCount != 4 {
+		t.Fatalf("expected 4 state events counted, got %d", stateCount)
+	}
+
+	limit, offset := 2, 1
+	page, err := handler.GetTaskEvents(&GetTaskEventsParams{TaskID: &task.ID, Limit: &limit, Offset: &offset})
+	if err != nil {
+		t.Fatalf("GetTaskEvents() page error = %v", err)
+	}
+	if len(page) != 2 || page[0].ID != events[1].ID || page[1].ID != events[2].ID {
+		t.Fatalf("expected the second and third newest events, got %+v", page)
+	}
+
+	otherEvents, err := handler.GetTaskEvents(&GetTaskEventsParams{TaskID: &otherTask.ID})
+	if err != nil {
+		t.Fatalf("GetTaskEvents() other task error = %v", err)
+	}
+	if len(otherEvents) != 1 {
+		t.Fatalf("expected 1 event for the other task, got %d", len(otherEvents))
+	}
+
+	all, err := handler.GetTaskEvents(nil)
+	if err != nil {
+		t.Fatalf("GetTaskEvents() without params error = %v", err)
+	}
+	if len(all) != 6 {
+		t.Fatalf("expected 6 events in total, got %d", len(all))
+	}
+}

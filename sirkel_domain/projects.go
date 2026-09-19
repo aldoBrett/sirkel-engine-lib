@@ -41,6 +41,35 @@ const (
 	TaskItemStateCancelled  TaskItemState = "cancelled"
 )
 
+// TaskEventField is a task or task item field whose changes are recorded in the task history.
+type TaskEventField string
+
+const (
+	TaskEventFieldName              TaskEventField = "name"
+	TaskEventFieldDescription       TaskEventField = "description"
+	TaskEventFieldState             TaskEventField = "state"
+	TaskEventFieldResponsibleUserID TaskEventField = "responsible_user_id"
+	TaskEventFieldAssignedUserID    TaskEventField = "assigned_user_id"
+)
+
+// TaskStates lists every task state in workflow order.
+var TaskStates = []TaskState{
+	TaskStateTodo,
+	TaskStateInProgress,
+	TaskStateInReview,
+	TaskStateBlocked,
+	TaskStateDone,
+	TaskStateCancelled,
+}
+
+// TaskItemStates lists every task item state in workflow order.
+var TaskItemStates = []TaskItemState{
+	TaskItemStatePending,
+	TaskItemStateInProgress,
+	TaskItemStateDone,
+	TaskItemStateCancelled,
+}
+
 type Project struct {
 	ID             string       `json:"id"`
 	OrganizationID string       `json:"organization_id"`
@@ -94,6 +123,19 @@ type TaskItem struct {
 type TaskItemStateCount struct {
 	State TaskItemState `json:"state"`
 	Count int           `json:"count"`
+}
+
+// TaskEvent is one recorded change of a task or, when TaskItemID is set, of one of its items.
+// A nil OldValue means the field was created or had no value, and a nil NewValue means it was cleared.
+type TaskEvent struct {
+	ID         int64          `json:"id"`
+	TaskID     string         `json:"task_id"`
+	TaskItemID *string        `json:"task_item_id,omitempty"`
+	Field      TaskEventField `json:"field"`
+	OldValue   *string        `json:"old_value"`
+	NewValue   *string        `json:"new_value"`
+	ChangedBy  *string        `json:"changed_by,omitempty"`
+	ChangedAt  time.Time      `json:"changed_at"`
 }
 
 type TaskForIndex struct {

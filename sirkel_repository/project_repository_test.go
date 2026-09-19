@@ -16,6 +16,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// testDatabaseLockID is the advisory lock that serializes tests across packages.
+const testDatabaseLockID = 7264120
+
 func testUUID(t *testing.T) string {
 	t.Helper()
 
@@ -50,10 +53,25 @@ func testPool(t *testing.T) *pgxpool.Pool {
 		t.Skipf("skipping: test database not reachable: %v", err)
 	}
 
+	// Other packages share this database, so tests take turns using it.
+	t.Cleanup(pool.Close)
+	lockConn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("unable to acquire connection: %v", err)
+	}
+	t.Cleanup(lockConn.Release)
+	if _, err := lockConn.Exec(ctx, `SELECT pg_advisory_lock($1)`, testDatabaseLockID); err != nil {
+		t.Fatalf("unable to lock test database: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := lockConn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, testDatabaseLockID); err != nil {
+			t.Errorf("unable to unlock test database: %v", err)
+		}
+	})
+
 	applyMigrations(t, pool)
 	t.Cleanup(func() {
 		truncateAll(t, pool)
-		pool.Close()
 	})
 
 	return pool
