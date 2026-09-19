@@ -43,26 +43,27 @@ func NewProjectsRepositoryHandler(ctx context.Context, pool *pgxpool.Pool, user 
 }
 
 func (h *ProjectsRepositoryHandler) SaveProject(project *sirkel_domain.Project) error {
-	if project.OrganizationID == "" && h.user.Role != "super_admin" {
+	if project.OrganizationID == "" && h.user != nil && h.user.Role != sirkel_domain.RoleSuperAdmin {
 		project.OrganizationID = h.user.OrganizationID
 	}
 
 	return h.pool.QueryRow(h.ctx, `
-		INSERT INTO sirkel_engine.projects (id, organization_id, name, description, state)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO sirkel_engine.projects AS p (id, organization_id, name, description, state, created_by, updated_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $6)
 		ON CONFLICT (id) DO UPDATE
 		SET name = EXCLUDED.name,
 			description = EXCLUDED.description,
 			state = EXCLUDED.state,
+			updated_by = COALESCE(EXCLUDED.updated_by, p.updated_by),
 			updated_at = now()
-		RETURNING created_at, updated_at
-	`, project.ID, project.OrganizationID, project.Name, project.Description, project.State,
-	).Scan(&project.CreatedAt, &project.UpdatedAt)
+		RETURNING created_by, updated_by, created_at, updated_at
+	`, project.ID, project.OrganizationID, project.Name, project.Description, project.State, actorID(h.user),
+	).Scan(&project.CreatedBy, &project.UpdatedBy, &project.CreatedAt, &project.UpdatedAt)
 }
 
 func (h *ProjectsRepositoryHandler) GetProjects(params *GetProjectsParams) ([]*sirkel_domain.Project, error) {
 	query := `
-		SELECT id, organization_id, name, description, state, created_at, updated_at
+		SELECT id, organization_id, name, description, state, created_by, updated_by, created_at, updated_at
 		FROM sirkel_engine.projects
 		WHERE 1 = 1
 	`
@@ -100,6 +101,8 @@ func (h *ProjectsRepositoryHandler) GetProjects(params *GetProjectsParams) ([]*s
 			&project.Name,
 			&project.Description,
 			&project.State,
+			&project.CreatedBy,
+			&project.UpdatedBy,
 			&project.CreatedAt,
 			&project.UpdatedAt,
 		); err != nil {
@@ -133,7 +136,7 @@ func (h *ProjectsRepositoryHandler) DeleteProject(projectID *string) error {
 func (h *ProjectsRepositoryHandler) GetProjectByID(projectID *string) (*sirkel_domain.Project, error) {
 	project := &sirkel_domain.Project{}
 	err := h.pool.QueryRow(h.ctx, `
-		SELECT id, organization_id, name, description, state, created_at, updated_at
+		SELECT id, organization_id, name, description, state, created_by, updated_by, created_at, updated_at
 		FROM sirkel_engine.projects
 		WHERE id = $1
 	`, *projectID).Scan(
@@ -142,6 +145,8 @@ func (h *ProjectsRepositoryHandler) GetProjectByID(projectID *string) (*sirkel_d
 		&project.Name,
 		&project.Description,
 		&project.State,
+		&project.CreatedBy,
+		&project.UpdatedBy,
 		&project.CreatedAt,
 		&project.UpdatedAt,
 	)

@@ -51,22 +51,30 @@ func NewTasksRepositoryHandler(ctx context.Context, pool *pgxpool.Pool, user *si
 }
 
 func (h *TasksRepositoryHandler) SaveTask(task *sirkel_domain.Task) error {
+	if task.ResponsibleUserID != nil {
+		if err := userBelongsToGoalOrganization(h.ctx, h.pool, *task.ResponsibleUserID, task.GoalID); err != nil {
+			return err
+		}
+	}
+
 	return h.pool.QueryRow(h.ctx, `
-		INSERT INTO sirkel_engine.tasks (id, goal_id, name, description, state)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO sirkel_engine.tasks AS t (id, goal_id, name, description, state, responsible_user_id, created_by, updated_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
 		ON CONFLICT (id) DO UPDATE
 		SET name = EXCLUDED.name,
 			description = EXCLUDED.description,
 			state = EXCLUDED.state,
+			responsible_user_id = EXCLUDED.responsible_user_id,
+			updated_by = COALESCE(EXCLUDED.updated_by, t.updated_by),
 			updated_at = now()
-		RETURNING created_at, updated_at
-	`, task.ID, task.GoalID, task.Name, task.Description, task.State,
-	).Scan(&task.CreatedAt, &task.UpdatedAt)
+		RETURNING created_by, updated_by, created_at, updated_at
+	`, task.ID, task.GoalID, task.Name, task.Description, task.State, task.ResponsibleUserID, actorID(h.user),
+	).Scan(&task.CreatedBy, &task.UpdatedBy, &task.CreatedAt, &task.UpdatedAt)
 }
 
 func (h *TasksRepositoryHandler) GetTasks(params *GetTasksParams) ([]*sirkel_domain.Task, error) {
 	query := `
-		SELECT id, goal_id, name, description, state, created_at, updated_at
+		SELECT id, goal_id, name, description, state, responsible_user_id, created_by, updated_by, created_at, updated_at
 		FROM sirkel_engine.tasks
 		WHERE 1 = 1
 	`
@@ -104,6 +112,9 @@ func (h *TasksRepositoryHandler) GetTasks(params *GetTasksParams) ([]*sirkel_dom
 			&task.Name,
 			&task.Description,
 			&task.State,
+			&task.ResponsibleUserID,
+			&task.CreatedBy,
+			&task.UpdatedBy,
 			&task.CreatedAt,
 			&task.UpdatedAt,
 		); err != nil {
@@ -189,7 +200,7 @@ func (h *TasksRepositoryHandler) DeleteTask(taskID *string) error {
 func (h *TasksRepositoryHandler) GetTaskByID(taskID *string) (*sirkel_domain.Task, error) {
 	task := &sirkel_domain.Task{}
 	err := h.pool.QueryRow(h.ctx, `
-		SELECT id, goal_id, name, description, state, created_at, updated_at
+		SELECT id, goal_id, name, description, state, responsible_user_id, created_by, updated_by, created_at, updated_at
 		FROM sirkel_engine.tasks
 		WHERE id = $1
 	`, *taskID).Scan(
@@ -198,6 +209,9 @@ func (h *TasksRepositoryHandler) GetTaskByID(taskID *string) (*sirkel_domain.Tas
 		&task.Name,
 		&task.Description,
 		&task.State,
+		&task.ResponsibleUserID,
+		&task.CreatedBy,
+		&task.UpdatedBy,
 		&task.CreatedAt,
 		&task.UpdatedAt,
 	)

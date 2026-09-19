@@ -2,6 +2,7 @@ package sirkel_repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -122,6 +123,131 @@ func TestTasksRepositoryHandler_SaveTask_NullDescription(t *testing.T) {
 	}
 	if fetched.Description != nil {
 		t.Fatalf("expected nil description, got %v", *fetched.Description)
+	}
+}
+
+func TestTasksRepositoryHandler_SaveTask_TracksCreatorAndEditor(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	creator := createTestUser(t, pool, organizationID)
+	editor := createTestUser(t, pool, organizationID)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+
+	task := mustSaveTask(t, NewTasksRepositoryHandler(context.Background(), pool, creator), goal.ID, "Assembly", sirkel_domain.TaskStateTodo)
+	assertUserID(t, "created_by", task.CreatedBy, creator.ID)
+	assertUserID(t, "updated_by", task.UpdatedBy, creator.ID)
+
+	task.Name = "Assembly v2"
+	if err := NewTasksRepositoryHandler(context.Background(), pool, editor).SaveTask(task); err != nil {
+		t.Fatalf("SaveTask() update error = %v", err)
+	}
+
+	fetched, err := NewTasksRepositoryHandler(context.Background(), pool, nil).GetTaskByID(&task.ID)
+	if err != nil {
+		t.Fatalf("GetTaskByID() error = %v", err)
+	}
+	assertUserID(t, "created_by", fetched.CreatedBy, creator.ID)
+	assertUserID(t, "updated_by", fetched.UpdatedBy, editor.ID)
+}
+
+func TestTasksRepositoryHandler_SaveTask_WithoutActorKeepsUpdatedBy(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	creator := createTestUser(t, pool, organizationID)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+
+	task := mustSaveTask(t, NewTasksRepositoryHandler(context.Background(), pool, creator), goal.ID, "Assembly", sirkel_domain.TaskStateTodo)
+
+	task.Name = "Renamed by the system"
+	if err := NewTasksRepositoryHandler(context.Background(), pool, nil).SaveTask(task); err != nil {
+		t.Fatalf("SaveTask() update error = %v", err)
+	}
+
+	assertUserID(t, "updated_by", task.UpdatedBy, creator.ID)
+}
+
+func TestTasksRepositoryHandler_SaveTask_ResponsibleUser(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	responsible := createTestUser(t, pool, organizationID)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+	handler := NewTasksRepositoryHandler(context.Background(), pool, nil)
+
+	task := &sirkel_domain.Task{
+		ID:                testUUID(t),
+		GoalID:            goal.ID,
+		Name:              "Assembly",
+		State:             sirkel_domain.TaskStateTodo,
+		ResponsibleUserID: &responsible.ID,
+	}
+	if err := handler.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask() error = %v", err)
+	}
+
+	fetched, err := handler.GetTaskByID(&task.ID)
+	if err != nil {
+		t.Fatalf("GetTaskByID() error = %v", err)
+	}
+	assertUserID(t, "responsible_user_id", fetched.ResponsibleUserID, responsible.ID)
+
+	tasks, err := handler.GetTasks(&GetTasksParams{GoalID: &goal.ID})
+	if err != nil {
+		t.Fatalf("GetTasks() error = %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	assertUserID(t, "responsible_user_id", tasks[0].ResponsibleUserID, responsible.ID)
+
+	task.ResponsibleUserID = nil
+	if err := handler.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask() unassign error = %v", err)
+	}
+
+	fetched, err = handler.GetTaskByID(&task.ID)
+	if err != nil {
+		t.Fatalf("GetTaskByID() error = %v", err)
+	}
+	if fetched.ResponsibleUserID != nil {
+		t.Fatalf("expected responsible user to be cleared, got %q", *fetched.ResponsibleUserID)
+	}
+}
+
+func TestTasksRepositoryHandler_SaveTask_RejectsResponsibleFromOtherOrganization(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	otherOrganizationID := createTestOrganization(t, pool)
+	outsider := createTestUser(t, pool, otherOrganizationID)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+	handler := NewTasksRepositoryHandler(context.Background(), pool, nil)
+
+	task := &sirkel_domain.Task{
+		ID:                testUUID(t),
+		GoalID:            goal.ID,
+		Name:              "Assembly",
+		State:             sirkel_domain.TaskStateTodo,
+		ResponsibleUserID: &outsider.ID,
+	}
+	if err := handler.SaveTask(task); !errors.Is(err, ErrAssigneeNotInOrganization) {
+		t.Fatalf("expected ErrAssigneeNotInOrganization, got %v", err)
+	}
+
+	fetched, err := handler.GetTaskByID(&task.ID)
+	if err != nil {
+		t.Fatalf("GetTaskByID() error = %v", err)
+	}
+	if fetched != nil {
+		t.Fatal("expected task not to be saved")
+	}
+
+	unknownID := testUUID(t)
+	task.ResponsibleUserID = &unknownID
+	if err := handler.SaveTask(task); !errors.Is(err, ErrAssigneeNotInOrganization) {
+		t.Fatalf("expected ErrAssigneeNotInOrganization for unknown user, got %v", err)
 	}
 }
 

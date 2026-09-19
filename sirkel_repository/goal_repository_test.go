@@ -32,6 +32,30 @@ func mustSaveGoal(t *testing.T, handler *GoalsRepositoryHandler, projectID, name
 	return goal
 }
 
+func TestGoalsRepositoryHandler_SaveGoal_TracksCreatorAndEditor(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	creator := createTestUser(t, pool, organizationID)
+	editor := createTestUser(t, pool, organizationID)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+
+	goal := mustSaveGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, creator), project.ID, "Launch", sirkel_domain.GoalStateActive)
+	assertUserID(t, "created_by", goal.CreatedBy, creator.ID)
+	assertUserID(t, "updated_by", goal.UpdatedBy, creator.ID)
+
+	goal.Name = "Launch v2"
+	if err := NewGoalsRepositoryHandler(context.Background(), pool, editor).SaveGoal(goal); err != nil {
+		t.Fatalf("SaveGoal() update error = %v", err)
+	}
+
+	fetched, err := NewGoalsRepositoryHandler(context.Background(), pool, nil).GetGoalByID(&goal.ID)
+	if err != nil {
+		t.Fatalf("GetGoalByID() error = %v", err)
+	}
+	assertUserID(t, "created_by", fetched.CreatedBy, creator.ID)
+	assertUserID(t, "updated_by", fetched.UpdatedBy, editor.ID)
+}
+
 func TestGoalsRepositoryHandler_SaveGoal_Insert(t *testing.T) {
 	pool := testPool(t)
 	organizationID := createTestOrganization(t, pool)

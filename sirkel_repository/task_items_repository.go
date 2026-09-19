@@ -44,22 +44,30 @@ func NewTaskItemsRepositoryHandler(ctx context.Context, pool *pgxpool.Pool, user
 }
 
 func (h *TaskItemsRepositoryHandler) SaveTaskItem(taskItem *sirkel_domain.TaskItem) error {
+	if taskItem.AssignedUserID != nil {
+		if err := userBelongsToTaskOrganization(h.ctx, h.pool, *taskItem.AssignedUserID, taskItem.TaskID); err != nil {
+			return err
+		}
+	}
+
 	return h.pool.QueryRow(h.ctx, `
-		INSERT INTO sirkel_engine.task_items (id, task_id, name, description, state)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO sirkel_engine.task_items AS ti (id, task_id, name, description, state, assigned_user_id, created_by, updated_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
 		ON CONFLICT (id) DO UPDATE
 		SET name = EXCLUDED.name,
 			description = EXCLUDED.description,
 			state = EXCLUDED.state,
+			assigned_user_id = EXCLUDED.assigned_user_id,
+			updated_by = COALESCE(EXCLUDED.updated_by, ti.updated_by),
 			updated_at = now()
-		RETURNING created_at, updated_at
-	`, taskItem.ID, taskItem.TaskID, taskItem.Name, taskItem.Description, taskItem.State,
-	).Scan(&taskItem.CreatedAt, &taskItem.UpdatedAt)
+		RETURNING created_by, updated_by, created_at, updated_at
+	`, taskItem.ID, taskItem.TaskID, taskItem.Name, taskItem.Description, taskItem.State, taskItem.AssignedUserID, actorID(h.user),
+	).Scan(&taskItem.CreatedBy, &taskItem.UpdatedBy, &taskItem.CreatedAt, &taskItem.UpdatedAt)
 }
 
 func (h *TaskItemsRepositoryHandler) GetTaskItems(params *GetTaskItemsParams) ([]*sirkel_domain.TaskItem, error) {
 	query := `
-		SELECT id, task_id, name, description, state, created_at, updated_at
+		SELECT id, task_id, name, description, state, assigned_user_id, created_by, updated_by, created_at, updated_at
 		FROM sirkel_engine.task_items
 		WHERE 1 = 1
 	`
@@ -97,6 +105,9 @@ func (h *TaskItemsRepositoryHandler) GetTaskItems(params *GetTaskItemsParams) ([
 			&taskItem.Name,
 			&taskItem.Description,
 			&taskItem.State,
+			&taskItem.AssignedUserID,
+			&taskItem.CreatedBy,
+			&taskItem.UpdatedBy,
 			&taskItem.CreatedAt,
 			&taskItem.UpdatedAt,
 		); err != nil {
@@ -130,7 +141,7 @@ func (h *TaskItemsRepositoryHandler) DeleteTaskItem(taskItemID *string) error {
 func (h *TaskItemsRepositoryHandler) GetTaskItemByID(taskItemID *string) (*sirkel_domain.TaskItem, error) {
 	taskItem := &sirkel_domain.TaskItem{}
 	err := h.pool.QueryRow(h.ctx, `
-		SELECT id, task_id, name, description, state, created_at, updated_at
+		SELECT id, task_id, name, description, state, assigned_user_id, created_by, updated_by, created_at, updated_at
 		FROM sirkel_engine.task_items
 		WHERE id = $1
 	`, *taskItemID).Scan(
@@ -139,6 +150,9 @@ func (h *TaskItemsRepositoryHandler) GetTaskItemByID(taskItemID *string) (*sirke
 		&taskItem.Name,
 		&taskItem.Description,
 		&taskItem.State,
+		&taskItem.AssignedUserID,
+		&taskItem.CreatedBy,
+		&taskItem.UpdatedBy,
 		&taskItem.CreatedAt,
 		&taskItem.UpdatedAt,
 	)

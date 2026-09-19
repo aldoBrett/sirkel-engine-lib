@@ -112,6 +112,37 @@ func createTestOrganization(t *testing.T, pool *pgxpool.Pool) string {
 	return organizationID
 }
 
+func createTestUser(t *testing.T, pool *pgxpool.Pool, organizationID string) *sirkel_domain.User {
+	t.Helper()
+
+	user := &sirkel_domain.User{
+		ID:             testUUID(t),
+		OrganizationID: organizationID,
+		Email:          testUUID(t) + "@example.com",
+		Role:           "user",
+	}
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO auth.users (id, organization_id, email, password_hash, role)
+		VALUES ($1, $2, $3, 'test-hash', $4)
+	`, user.ID, user.OrganizationID, user.Email, user.Role)
+	if err != nil {
+		t.Fatalf("unable to create test user: %v", err)
+	}
+
+	return user
+}
+
+func assertUserID(t *testing.T, field string, got *string, want string) {
+	t.Helper()
+
+	if got == nil {
+		t.Fatalf("expected %s %q, got nil", field, want)
+	}
+	if *got != want {
+		t.Fatalf("expected %s %q, got %q", field, want, *got)
+	}
+}
+
 func mustSaveProject(t *testing.T, handler *ProjectsRepositoryHandler, organizationID, name string, state sirkel_domain.ProjectState) *sirkel_domain.Project {
 	t.Helper()
 
@@ -185,6 +216,29 @@ func TestProjectsRepositoryHandler_SaveProject_Update(t *testing.T) {
 	if fetched.State != sirkel_domain.ProjectStateActive {
 		t.Fatalf("expected state %q, got %q", sirkel_domain.ProjectStateActive, fetched.State)
 	}
+}
+
+func TestProjectsRepositoryHandler_SaveProject_TracksCreatorAndEditor(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	creator := createTestUser(t, pool, organizationID)
+	editor := createTestUser(t, pool, organizationID)
+
+	project := mustSaveProject(t, NewProjectsRepositoryHandler(context.Background(), pool, creator), organizationID, "Rocket", sirkel_domain.ProjectStatePlanning)
+	assertUserID(t, "created_by", project.CreatedBy, creator.ID)
+	assertUserID(t, "updated_by", project.UpdatedBy, creator.ID)
+
+	project.Name = "Rocket v2"
+	if err := NewProjectsRepositoryHandler(context.Background(), pool, editor).SaveProject(project); err != nil {
+		t.Fatalf("SaveProject() update error = %v", err)
+	}
+
+	fetched, err := NewProjectsRepositoryHandler(context.Background(), pool, nil).GetProjectByID(&project.ID)
+	if err != nil {
+		t.Fatalf("GetProjectByID() error = %v", err)
+	}
+	assertUserID(t, "created_by", fetched.CreatedBy, creator.ID)
+	assertUserID(t, "updated_by", fetched.UpdatedBy, editor.ID)
 }
 
 func TestProjectsRepositoryHandler_GetProjectByID_NotFound(t *testing.T) {

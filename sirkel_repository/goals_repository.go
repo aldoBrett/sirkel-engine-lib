@@ -45,21 +45,22 @@ func NewGoalsRepositoryHandler(ctx context.Context, pool *pgxpool.Pool, user *si
 
 func (h *GoalsRepositoryHandler) SaveGoal(goal *sirkel_domain.Goal) error {
 	return h.pool.QueryRow(h.ctx, `
-		INSERT INTO sirkel_engine.goals (id, project_id, name, description, state)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO sirkel_engine.goals AS g (id, project_id, name, description, state, created_by, updated_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $6)
 		ON CONFLICT (id) DO UPDATE
 		SET name = EXCLUDED.name,
 			description = EXCLUDED.description,
 			state = EXCLUDED.state,
+			updated_by = COALESCE(EXCLUDED.updated_by, g.updated_by),
 			updated_at = now()
-		RETURNING created_at, updated_at
-	`, goal.ID, goal.ProjectID, goal.Name, goal.Description, goal.State,
-	).Scan(&goal.CreatedAt, &goal.UpdatedAt)
+		RETURNING created_by, updated_by, created_at, updated_at
+	`, goal.ID, goal.ProjectID, goal.Name, goal.Description, goal.State, actorID(h.user),
+	).Scan(&goal.CreatedBy, &goal.UpdatedBy, &goal.CreatedAt, &goal.UpdatedAt)
 }
 
 func (h *GoalsRepositoryHandler) GetGoals(params *GetGoalsParams) ([]*sirkel_domain.Goal, error) {
 	query := `
-		SELECT id, project_id, name, description, state, created_at, updated_at
+		SELECT id, project_id, name, description, state, created_by, updated_by, created_at, updated_at
 		FROM sirkel_engine.goals
 		WHERE 1 = 1
 	`
@@ -97,6 +98,8 @@ func (h *GoalsRepositoryHandler) GetGoals(params *GetGoalsParams) ([]*sirkel_dom
 			&goal.Name,
 			&goal.Description,
 			&goal.State,
+			&goal.CreatedBy,
+			&goal.UpdatedBy,
 			&goal.CreatedAt,
 			&goal.UpdatedAt,
 		); err != nil {
@@ -130,7 +133,7 @@ func (h *GoalsRepositoryHandler) DeleteGoal(goalID *string) error {
 func (h *GoalsRepositoryHandler) GetGoalByID(goalID *string) (*sirkel_domain.Goal, error) {
 	goal := &sirkel_domain.Goal{}
 	err := h.pool.QueryRow(h.ctx, `
-		SELECT id, project_id, name, description, state, created_at, updated_at
+		SELECT id, project_id, name, description, state, created_by, updated_by, created_at, updated_at
 		FROM sirkel_engine.goals
 		WHERE id = $1
 	`, *goalID).Scan(
@@ -139,6 +142,8 @@ func (h *GoalsRepositoryHandler) GetGoalByID(goalID *string) (*sirkel_domain.Goa
 		&goal.Name,
 		&goal.Description,
 		&goal.State,
+		&goal.CreatedBy,
+		&goal.UpdatedBy,
 		&goal.CreatedAt,
 		&goal.UpdatedAt,
 	)

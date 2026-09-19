@@ -47,6 +47,8 @@ type Project struct {
 	Name           string       `json:"name"`
 	Description    string       `json:"description"`
 	State          ProjectState `json:"state"`
+	CreatedBy      *string      `json:"created_by,omitempty"`
+	UpdatedBy      *string      `json:"updated_by,omitempty"`
 	CreatedAt      time.Time    `json:"created_at"`
 	UpdatedAt      time.Time    `json:"updated_at"`
 }
@@ -57,28 +59,36 @@ type Goal struct {
 	Name        string    `json:"name"`
 	Description *string   `json:"description,omitempty"`
 	State       GoalState `json:"state"`
+	CreatedBy   *string   `json:"created_by,omitempty"`
+	UpdatedBy   *string   `json:"updated_by,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type Task struct {
-	ID          string    `json:"id"`
-	GoalID      string    `json:"goal_id"`
-	Name        string    `json:"name"`
-	Description *string   `json:"description,omitempty"`
-	State       TaskState `json:"state"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                string    `json:"id"`
+	GoalID            string    `json:"goal_id"`
+	Name              string    `json:"name"`
+	Description       *string   `json:"description,omitempty"`
+	State             TaskState `json:"state"`
+	ResponsibleUserID *string   `json:"responsible_user_id,omitempty"`
+	CreatedBy         *string   `json:"created_by,omitempty"`
+	UpdatedBy         *string   `json:"updated_by,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type TaskItem struct {
-	ID          string        `json:"id"`
-	TaskID      string        `json:"task_id"`
-	Name        string        `json:"name"`
-	Description *string       `json:"description,omitempty"`
-	State       TaskItemState `json:"state"`
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	ID             string        `json:"id"`
+	TaskID         string        `json:"task_id"`
+	Name           string        `json:"name"`
+	Description    *string       `json:"description,omitempty"`
+	State          TaskItemState `json:"state"`
+	AssignedUserID *string       `json:"assigned_user_id,omitempty"`
+	CreatedBy      *string       `json:"created_by,omitempty"`
+	UpdatedBy      *string       `json:"updated_by,omitempty"`
+	CreatedAt      time.Time     `json:"created_at"`
+	UpdatedAt      time.Time     `json:"updated_at"`
 }
 
 type TaskItemStateCount struct {

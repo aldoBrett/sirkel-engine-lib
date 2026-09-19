@@ -1,5 +1,7 @@
 package sirkel_domain
 
+const RoleSuperAdmin = "super_admin"
+
 type Organization struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
