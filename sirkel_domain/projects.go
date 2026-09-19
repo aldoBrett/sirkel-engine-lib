@@ -80,3 +80,13 @@ type TaskItem struct {
 	CreatedAt   time.Time     `json:"created_at"`
 	UpdatedAt   time.Time     `json:"updated_at"`
 }
+
+type TaskItemStateCount struct {
+	State TaskItemState `json:"state"`
+	Count int           `json:"count"`
+}
+
+type TaskForIndex struct {
+	Task                Task                 `json:"task"`
+	TaskItemStateCounts []TaskItemStateCount `json:"task_item_state_counts"`
+}

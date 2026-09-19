@@ -192,6 +192,127 @@ func TestTasksRepositoryHandler_GetTasks_Pagination(t *testing.T) {
 	}
 }
 
+func assertStateCounts(t *testing.T, got []sirkel_domain.TaskItemStateCount, pending, inProgress, done, cancelled int) {
+	t.Helper()
+
+	want := []sirkel_domain.TaskItemStateCount{
+		{State: sirkel_domain.TaskItemStatePending, Count: pending},
+		{State: sirkel_domain.TaskItemStateInProgress, Count: inProgress},
+		{State: sirkel_domain.TaskItemStateDone, Count: done},
+		{State: sirkel_domain.TaskItemStateCancelled, Count: cancelled},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d state counts, got %d: %+v", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("state count %d: expected %+v, got %+v", i, want[i], got[i])
+		}
+	}
+}
+
+func TestTasksRepositoryHandler_GetTasksForIndex_CountsItemsPerState(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+	handler := NewTasksRepositoryHandler(context.Background(), pool, nil)
+	itemsHandler := NewTaskItemsRepositoryHandler(context.Background(), pool, nil)
+
+	taskA := mustSaveTask(t, handler, goal.ID, "A", sirkel_domain.TaskStateInProgress)
+	taskB := mustSaveTask(t, handler, goal.ID, "B", sirkel_domain.TaskStateTodo)
+
+	mustSaveTaskItem(t, itemsHandler, taskA.ID, "A1", sirkel_domain.TaskItemStatePending)
+	mustSaveTaskItem(t, itemsHandler, taskA.ID, "A2", sirkel_domain.TaskItemStateDone)
+	mustSaveTaskItem(t, itemsHandler, taskA.ID, "A3", sirkel_domain.TaskItemStateDone)
+	mustSaveTaskItem(t, itemsHandler, taskA.ID, "A4", sirkel_domain.TaskItemStateInProgress)
+	mustSaveTaskItem(t, itemsHandler, taskB.ID, "B1", sirkel_domain.TaskItemStateCancelled)
+
+	results, err := handler.GetTasksForIndex(&GetTasksParams{GoalID: &goal.ID})
+	if err != nil {
+		t.Fatalf("GetTasksForIndex() error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(results))
+	}
+
+	byID := map[string]*sirkel_domain.TaskForIndex{}
+	for _, result := range results {
+		byID[result.Task.ID] = result
+	}
+
+	assertStateCounts(t, byID[taskA.ID].TaskItemStateCounts, 1, 1, 2, 0)
+	assertStateCounts(t, byID[taskB.ID].TaskItemStateCounts, 0, 0, 0, 1)
+}
+
+func TestTasksRepositoryHandler_GetTasksForIndex_ZeroFillsTaskWithoutItems(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+	handler := NewTasksRepositoryHandler(context.Background(), pool, nil)
+
+	task := mustSaveTask(t, handler, goal.ID, "Empty", sirkel_domain.TaskStateTodo)
+
+	results, err := handler.GetTasksForIndex(&GetTasksParams{GoalID: &goal.ID})
+	if err != nil {
+		t.Fatalf("GetTasksForIndex() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(results))
+	}
+	if results[0].Task.ID != task.ID {
+		t.Fatalf("expected task %q, got %q", task.ID, results[0].Task.ID)
+	}
+	assertStateCounts(t, results[0].TaskItemStateCounts, 0, 0, 0, 0)
+}
+
+func TestTasksRepositoryHandler_GetTasksForIndex_NoTasks(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+	handler := NewTasksRepositoryHandler(context.Background(), pool, nil)
+
+	results, err := handler.GetTasksForIndex(&GetTasksParams{GoalID: &goal.ID})
+	if err != nil {
+		t.Fatalf("GetTasksForIndex() error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected no tasks, got %d", len(results))
+	}
+}
+
+func TestTasksRepositoryHandler_GetTasksForIndex_OnlyCountsOwnItemsAndPaginates(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+	handler := NewTasksRepositoryHandler(context.Background(), pool, nil)
+	itemsHandler := NewTaskItemsRepositoryHandler(context.Background(), pool, nil)
+
+	// Created first, so with created_at DESC ordering it falls outside limit=1.
+	other := mustSaveTask(t, handler, goal.ID, "Other", sirkel_domain.TaskStateTodo)
+	mustSaveTaskItem(t, itemsHandler, other.ID, "O1", sirkel_domain.TaskItemStateDone)
+	mustSaveTaskItem(t, itemsHandler, other.ID, "O2", sirkel_domain.TaskItemStateDone)
+
+	task := mustSaveTask(t, handler, goal.ID, "Mine", sirkel_domain.TaskStateTodo)
+	mustSaveTaskItem(t, itemsHandler, task.ID, "M1", sirkel_domain.TaskItemStateDone)
+
+	limit := 1
+	results, err := handler.GetTasksForIndex(&GetTasksParams{GoalID: &goal.ID, Limit: &limit})
+	if err != nil {
+		t.Fatalf("GetTasksForIndex() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 task with limit, got %d", len(results))
+	}
+	if results[0].Task.ID != task.ID {
+		t.Fatalf("expected most recent task %q, got %q", task.ID, results[0].Task.ID)
+	}
+	assertStateCounts(t, results[0].TaskItemStateCounts, 0, 0, 1, 0)
+}
+
 func TestTasksRepositoryHandler_CountTasks(t *testing.T) {
 	pool := testPool(t)
 	organizationID := createTestOrganization(t, pool)
