@@ -2,7 +2,10 @@ module sirkel-engine-lib
 
 go 1.25.6
 
-require github.com/jackc/pgx/v5 v5.11.0
+require (
+	github.com/jackc/pgx/v5 v5.11.0
+	roci.dev/fracdex v0.0.0-20241211175510-82d7df79e312
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect

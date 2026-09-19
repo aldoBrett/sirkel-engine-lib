@@ -100,6 +100,7 @@ type Task struct {
 	Name              string    `json:"name"`
 	Description       *string   `json:"description,omitempty"`
 	State             TaskState `json:"state"`
+	SortKey           string    `json:"sort_key"`
 	ResponsibleUserID *string   `json:"responsible_user_id,omitempty"`
 	CreatedBy         *string   `json:"created_by,omitempty"`
 	UpdatedBy         *string   `json:"updated_by,omitempty"`
@@ -113,11 +114,28 @@ type TaskItem struct {
 	Name           string        `json:"name"`
 	Description    *string       `json:"description,omitempty"`
 	State          TaskItemState `json:"state"`
+	SortKey        string        `json:"sort_key"`
 	AssignedUserID *string       `json:"assigned_user_id,omitempty"`
 	CreatedBy      *string       `json:"created_by,omitempty"`
 	UpdatedBy      *string       `json:"updated_by,omitempty"`
 	CreatedAt      time.Time     `json:"created_at"`
 	UpdatedAt      time.Time     `json:"updated_at"`
+}
+
+// Cursor is a position in a list ordered by sort key: the sort key and ID of the last row already seen.
+type Cursor struct {
+	SortKey string `json:"sort_key"`
+	ID      string `json:"id"`
+}
+
+// Cursor returns the position right after the task, to pass as the After param of the next page.
+func (t *Task) Cursor() *Cursor {
+	return &Cursor{SortKey: t.SortKey, ID: t.ID}
+}
+
+// Cursor returns the position right after the task item, to pass as the After param of the next page.
+func (i *TaskItem) Cursor() *Cursor {
+	return &Cursor{SortKey: i.SortKey, ID: i.ID}
 }
 
 type TaskItemStateCount struct {
