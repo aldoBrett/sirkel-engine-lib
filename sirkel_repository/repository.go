@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var ErrOrganizationRequired = errors.New("organization is required")
+
 var ErrAssigneeNotInOrganization = errors.New("assigned user does not belong to the organization")
 
 // actorID returns the ID of the user performing the operation, or nil when there is none.

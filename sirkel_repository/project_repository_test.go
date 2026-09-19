@@ -3,6 +3,7 @@ package sirkel_repository
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -239,6 +240,54 @@ func TestProjectsRepositoryHandler_SaveProject_TracksCreatorAndEditor(t *testing
 	}
 	assertUserID(t, "created_by", fetched.CreatedBy, creator.ID)
 	assertUserID(t, "updated_by", fetched.UpdatedBy, editor.ID)
+}
+
+func TestProjectsRepositoryHandler_SaveProject_DefaultsOrganizationFromUser(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	member := createTestUser(t, pool, organizationID)
+	superAdmin := createTestUser(t, pool, organizationID)
+	superAdmin.Role = sirkel_domain.RoleSuperAdmin
+
+	for name, user := range map[string]*sirkel_domain.User{"member": member, "super admin": superAdmin} {
+		t.Run(name, func(t *testing.T) {
+			project := &sirkel_domain.Project{
+				ID:          testUUID(t),
+				Name:        "Rocket",
+				Description: "test description",
+				State:       sirkel_domain.ProjectStatePlanning,
+			}
+			if err := NewProjectsRepositoryHandler(context.Background(), pool, user).SaveProject(project); err != nil {
+				t.Fatalf("SaveProject() error = %v", err)
+			}
+			if project.OrganizationID != organizationID {
+				t.Fatalf("expected organization %q, got %q", organizationID, project.OrganizationID)
+			}
+		})
+	}
+}
+
+func TestProjectsRepositoryHandler_SaveProject_RequiresOrganization(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	noOrganization := createTestUser(t, pool, organizationID)
+	noOrganization.OrganizationID = ""
+	noOrganization.Role = sirkel_domain.RoleSuperAdmin
+
+	for name, user := range map[string]*sirkel_domain.User{"nil user": nil, "super admin without acting organization": noOrganization} {
+		t.Run(name, func(t *testing.T) {
+			project := &sirkel_domain.Project{
+				ID:          testUUID(t),
+				Name:        "Rocket",
+				Description: "test description",
+				State:       sirkel_domain.ProjectStatePlanning,
+			}
+			err := NewProjectsRepositoryHandler(context.Background(), pool, user).SaveProject(project)
+			if !errors.Is(err, ErrOrganizationRequired) {
+				t.Fatalf("expected ErrOrganizationRequired, got %v", err)
+			}
+		})
+	}
 }
 
 func TestProjectsRepositoryHandler_GetProjectByID_NotFound(t *testing.T) {

@@ -43,8 +43,11 @@ func NewProjectsRepositoryHandler(ctx context.Context, pool *pgxpool.Pool, user 
 }
 
 func (h *ProjectsRepositoryHandler) SaveProject(project *sirkel_domain.Project) error {
-	if project.OrganizationID == "" && h.user != nil && h.user.Role != sirkel_domain.RoleSuperAdmin {
+	if project.OrganizationID == "" && h.user != nil {
 		project.OrganizationID = h.user.OrganizationID
+	}
+	if project.OrganizationID == "" {
+		return ErrOrganizationRequired
 	}
 
 	return h.pool.QueryRow(h.ctx, `
