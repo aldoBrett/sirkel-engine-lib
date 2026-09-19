@@ -68,40 +68,44 @@ func (s sortScope) topKey(ctx context.Context, tx pgx.Tx, scopeID string) (strin
 	return sortKeyBetween("", first)
 }
 
-// positionKey returns the key that places movedID between the rows afterID (above it) and beforeID (below it).
-// When only one neighbor is given, the row goes right next to it, ahead of the row that follows it in the whole list.
+// positionKey returns the key that places movedID right below afterID, or right above beforeID when only that one is
+// given. The new key always goes between the neighbor and the row that actually follows (or precedes) it now, not
+// between the two rows the caller saw: a row another writer put in that gap in the meantime is respected, and two rows
+// dropped into the same gap never share a key. When both neighbors are given, beforeID only has to be below afterID.
 func (s sortScope) positionKey(ctx context.Context, tx pgx.Tx, scopeID, movedID string, afterID, beforeID *string) (string, error) {
 	if (afterID != nil && *afterID == movedID) || (beforeID != nil && *beforeID == movedID) {
 		return "", fmt.Errorf("%w: a row cannot be moved next to itself", ErrInvalidMove)
 	}
 
-	var lower, upper string
-	var err error
-	switch {
-	case afterID != nil && beforeID != nil:
-		if lower, err = s.neighborKey(ctx, tx, scopeID, *afterID); err != nil {
+	if afterID != nil {
+		lower, err := s.neighborKey(ctx, tx, scopeID, *afterID)
+		if err != nil {
 			return "", err
 		}
-		if upper, err = s.neighborKey(ctx, tx, scopeID, *beforeID); err != nil {
+		if beforeID != nil {
+			beforeKey, err := s.neighborKey(ctx, tx, scopeID, *beforeID)
+			if err != nil {
+				return "", err
+			}
+			if lower >= beforeKey {
+				return "", fmt.Errorf("%w: the row to place it after is not above the row to place it before", ErrInvalidMove)
+			}
+		}
+		upper, err := s.adjacentKey(ctx, tx, scopeID, movedID, *afterID, lower, true)
+		if err != nil {
 			return "", err
 		}
-		if lower >= upper {
-			return "", fmt.Errorf("%w: the row to place it after is not above the row to place it before", ErrInvalidMove)
-		}
-	case afterID != nil:
-		if lower, err = s.neighborKey(ctx, tx, scopeID, *afterID); err != nil {
-			return "", err
-		}
-		if upper, err = s.adjacentKey(ctx, tx, scopeID, movedID, *afterID, lower, true); err != nil {
-			return "", err
-		}
-	default:
-		if upper, err = s.neighborKey(ctx, tx, scopeID, *beforeID); err != nil {
-			return "", err
-		}
-		if lower, err = s.adjacentKey(ctx, tx, scopeID, movedID, *beforeID, upper, false); err != nil {
-			return "", err
-		}
+
+		return sortKeyBetween(lower, upper)
+	}
+
+	upper, err := s.neighborKey(ctx, tx, scopeID, *beforeID)
+	if err != nil {
+		return "", err
+	}
+	lower, err := s.adjacentKey(ctx, tx, scopeID, movedID, *beforeID, upper, false)
+	if err != nil {
+		return "", err
 	}
 
 	return sortKeyBetween(lower, upper)
