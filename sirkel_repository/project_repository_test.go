@@ -84,6 +84,7 @@ func truncateAll(t *testing.T, pool *pgxpool.Pool) {
 
 	_, err := pool.Exec(context.Background(), `
 		TRUNCATE TABLE
+			sirkel_engine.task_events,
 			sirkel_engine.task_items,
 			sirkel_engine.tasks,
 			sirkel_engine.goals,

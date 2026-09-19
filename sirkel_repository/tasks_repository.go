@@ -57,7 +57,18 @@ func (h *TasksRepositoryHandler) SaveTask(task *sirkel_domain.Task) error {
 		}
 	}
 
-	return h.pool.QueryRow(h.ctx, `
+	tx, err := h.pool.Begin(h.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(h.ctx)
+
+	previous, err := lockTask(h.ctx, tx, task.ID)
+	if err != nil {
+		return err
+	}
+
+	err = tx.QueryRow(h.ctx, `
 		INSERT INTO sirkel_engine.tasks AS t (id, goal_id, name, description, state, responsible_user_id, created_by, updated_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
 		ON CONFLICT (id) DO UPDATE
@@ -70,6 +81,52 @@ func (h *TasksRepositoryHandler) SaveTask(task *sirkel_domain.Task) error {
 		RETURNING created_by, updated_by, created_at, updated_at
 	`, task.ID, task.GoalID, task.Name, task.Description, task.State, task.ResponsibleUserID, actorID(h.user),
 	).Scan(&task.CreatedBy, &task.UpdatedBy, &task.CreatedAt, &task.UpdatedAt)
+	if err != nil {
+		return err
+	}
+
+	if err := insertTaskEvents(h.ctx, tx, task.ID, nil, actorID(h.user), taskChanges(previous, task)); err != nil {
+		return err
+	}
+
+	return tx.Commit(h.ctx)
+}
+
+// lockTask returns the stored task locked for the rest of the transaction, or nil if it doesn't exist yet.
+func lockTask(ctx context.Context, tx pgx.Tx, taskID string) (*sirkel_domain.Task, error) {
+	previous := &sirkel_domain.Task{}
+	err := tx.QueryRow(ctx, `
+		SELECT name, description, state, responsible_user_id
+		FROM sirkel_engine.tasks
+		WHERE id = $1
+		FOR UPDATE
+	`, taskID).Scan(&previous.Name, &previous.Description, &previous.State, &previous.ResponsibleUserID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return previous, nil
+}
+
+// taskChanges lists the tracked fields that differ between the stored task (nil on insert) and the one being saved.
+// An insert records the initial state, and the responsible user when there is one.
+func taskChanges(previous, task *sirkel_domain.Task) []fieldChange {
+	if previous == nil {
+		return changedFields(
+			fieldChange{"state", nil, strPtr(string(task.State))},
+			fieldChange{"responsible_user_id", nil, task.ResponsibleUserID},
+		)
+	}
+
+	return changedFields(
+		fieldChange{"name", strPtr(previous.Name), strPtr(task.Name)},
+		fieldChange{"description", previous.Description, task.Description},
+		fieldChange{"state", strPtr(string(previous.State)), strPtr(string(task.State))},
+		fieldChange{"responsible_user_id", previous.ResponsibleUserID, task.ResponsibleUserID},
+	)
 }
 
 func (h *TasksRepositoryHandler) GetTasks(params *GetTasksParams) ([]*sirkel_domain.Task, error) {

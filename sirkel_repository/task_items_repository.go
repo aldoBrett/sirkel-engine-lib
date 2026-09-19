@@ -50,7 +50,18 @@ func (h *TaskItemsRepositoryHandler) SaveTaskItem(taskItem *sirkel_domain.TaskIt
 		}
 	}
 
-	return h.pool.QueryRow(h.ctx, `
+	tx, err := h.pool.Begin(h.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(h.ctx)
+
+	previous, err := lockTaskItem(h.ctx, tx, taskItem.ID)
+	if err != nil {
+		return err
+	}
+
+	err = tx.QueryRow(h.ctx, `
 		INSERT INTO sirkel_engine.task_items AS ti (id, task_id, name, description, state, assigned_user_id, created_by, updated_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
 		ON CONFLICT (id) DO UPDATE
@@ -63,6 +74,57 @@ func (h *TaskItemsRepositoryHandler) SaveTaskItem(taskItem *sirkel_domain.TaskIt
 		RETURNING created_by, updated_by, created_at, updated_at
 	`, taskItem.ID, taskItem.TaskID, taskItem.Name, taskItem.Description, taskItem.State, taskItem.AssignedUserID, actorID(h.user),
 	).Scan(&taskItem.CreatedBy, &taskItem.UpdatedBy, &taskItem.CreatedAt, &taskItem.UpdatedAt)
+	if err != nil {
+		return err
+	}
+
+	// An existing item stays with its stored task, whatever TaskID the caller sent.
+	taskID := taskItem.TaskID
+	if previous != nil {
+		taskID = previous.TaskID
+	}
+	if err := insertTaskEvents(h.ctx, tx, taskID, &taskItem.ID, actorID(h.user), taskItemChanges(previous, taskItem)); err != nil {
+		return err
+	}
+
+	return tx.Commit(h.ctx)
+}
+
+// lockTaskItem returns the stored task item locked for the rest of the transaction, or nil if it doesn't exist yet.
+func lockTaskItem(ctx context.Context, tx pgx.Tx, taskItemID string) (*sirkel_domain.TaskItem, error) {
+	previous := &sirkel_domain.TaskItem{}
+	err := tx.QueryRow(ctx, `
+		SELECT task_id, name, description, state, assigned_user_id
+		FROM sirkel_engine.task_items
+		WHERE id = $1
+		FOR UPDATE
+	`, taskItemID).Scan(&previous.TaskID, &previous.Name, &previous.Description, &previous.State, &previous.AssignedUserID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return previous, nil
+}
+
+// taskItemChanges lists the tracked fields that differ between the stored task item (nil on insert) and the one being saved.
+// An insert records the initial state, and the assigned user when there is one.
+func taskItemChanges(previous, taskItem *sirkel_domain.TaskItem) []fieldChange {
+	if previous == nil {
+		return changedFields(
+			fieldChange{"state", nil, strPtr(string(taskItem.State))},
+			fieldChange{"assigned_user_id", nil, taskItem.AssignedUserID},
+		)
+	}
+
+	return changedFields(
+		fieldChange{"name", strPtr(previous.Name), strPtr(taskItem.Name)},
+		fieldChange{"description", previous.Description, taskItem.Description},
+		fieldChange{"state", strPtr(string(previous.State)), strPtr(string(taskItem.State))},
+		fieldChange{"assigned_user_id", previous.AssignedUserID, taskItem.AssignedUserID},
+	)
 }
 
 func (h *TaskItemsRepositoryHandler) GetTaskItems(params *GetTaskItemsParams) ([]*sirkel_domain.TaskItem, error) {
