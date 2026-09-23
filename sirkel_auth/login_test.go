@@ -57,8 +57,8 @@ func TestSirkelAuthHandler_Login_Success(t *testing.T) {
 	if claims["role"] != "admin" {
 		t.Fatalf("expected role claim %q, got %v", "admin", claims["role"])
 	}
-	if claims["platform"] != "tickets" {
-		t.Fatalf("expected platform claim %q, got %v", "tickets", claims["platform"])
+	if claims["platform"] != "sirkel" {
+		t.Fatalf("expected platform claim %q, got %v", "sirkel", claims["platform"])
 	}
 }
 

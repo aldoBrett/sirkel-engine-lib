@@ -293,7 +293,7 @@ func (h *TasksAnalyticsHandler) GetUsersWorkload(params *UsersWorkloadParams) ([
 		return nil, err
 	}
 
-	userRows, err := h.pool.Query(h.ctx, `SELECT id, email FROM auth.users WHERE organization_id = $1 ORDER BY email, id`, args[0])
+	userRows, err := h.pool.Query(h.ctx, `SELECT id, email FROM sirkel_engine.users WHERE organization_id = $1 ORDER BY email, id`, args[0])
 	if err != nil {
 		return nil, err
 	}
