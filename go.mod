@@ -6,8 +6,11 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	golang.org/x/crypto v0.55.0
+	golang.org/x/term v0.45.0
 	roci.dev/fracdex v0.0.0-20241211175510-82d7df79e312
 )
+
+require golang.org/x/sys v0.47.0 // indirect
 
 require (
 	github.com/golang-jwt/jwt v3.2.2+incompatible
