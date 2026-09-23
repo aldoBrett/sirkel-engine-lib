@@ -107,8 +107,8 @@ func truncateAll(t *testing.T, pool *pgxpool.Pool) {
 			sirkel_engine.tasks,
 			sirkel_engine.goals,
 			sirkel_engine.projects,
-			auth.users,
-			auth.organizations
+			sirkel_engine.users,
+			sirkel_engine.organizations
 		RESTART IDENTITY CASCADE
 	`)
 	if err != nil {
@@ -121,7 +121,7 @@ func createTestOrganization(t *testing.T, pool *pgxpool.Pool) string {
 
 	var organizationID string
 	err := pool.QueryRow(context.Background(), `
-		INSERT INTO auth.organizations (name, description)
+		INSERT INTO sirkel_engine.organizations (name, description)
 		VALUES ($1, $2)
 		RETURNING id
 	`, "Test Org", "org for tests").Scan(&organizationID)
@@ -142,8 +142,8 @@ func createTestUser(t *testing.T, pool *pgxpool.Pool, organizationID string) *si
 		Role:           "user",
 	}
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO auth.users (id, organization_id, email, password_hash, role)
-		VALUES ($1, $2, $3, 'test-hash', $4)
+		INSERT INTO sirkel_engine.users (id, organization_id, email, password_hash, role, name, first_surname, second_surname)
+		VALUES ($1, $2, $3, 'test-hash', $4, 'Test', 'User', 'Surname')
 	`, user.ID, user.OrganizationID, user.Email, user.Role)
 	if err != nil {
 		t.Fatalf("unable to create test user: %v", err)

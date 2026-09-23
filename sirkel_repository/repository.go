@@ -27,7 +27,7 @@ func userBelongsToGoalOrganization(ctx context.Context, pool *pgxpool.Pool, user
 	err := pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
-			FROM auth.users u
+			FROM sirkel_engine.users u
 			JOIN sirkel_engine.goals g ON g.id = $2
 			JOIN sirkel_engine.projects p ON p.id = g.project_id
 			WHERE u.id = $1 AND u.organization_id = p.organization_id
@@ -48,7 +48,7 @@ func userBelongsToTaskOrganization(ctx context.Context, pool *pgxpool.Pool, user
 	err := pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
-			FROM auth.users u
+			FROM sirkel_engine.users u
 			JOIN sirkel_engine.tasks t ON t.id = $2
 			JOIN sirkel_engine.goals g ON g.id = t.goal_id
 			JOIN sirkel_engine.projects p ON p.id = g.project_id

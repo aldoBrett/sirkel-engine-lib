@@ -45,6 +45,8 @@ type TaskItemsRepository interface {
 	// change is recorded in the task history.
 	MoveTaskItem(params *MoveTaskItemParams) (*sirkel_domain.TaskItem, error)
 	GetTaskItems(params *GetTaskItemsParams) ([]*sirkel_domain.TaskItem, error)
+	// GetTaskItemsWithUsers is GetTaskItems with the creator and assignee resolved from sirkel_engine.users.
+	GetTaskItemsWithUsers(params *GetTaskItemsParams) ([]*sirkel_domain.TaskItemWithUsers, error)
 	CountTaskItems(params *CountTaskItemsParams) (int, error)
 	DeleteTaskItem(taskItemID *string) error
 	GetTaskItemByID(taskItemID *string) (*sirkel_domain.TaskItem, error)
@@ -257,34 +259,39 @@ func taskItemChanges(previous, taskItem *sirkel_domain.TaskItem) []fieldChange {
 	)
 }
 
-func (h *TaskItemsRepositoryHandler) GetTaskItems(params *GetTaskItemsParams) ([]*sirkel_domain.TaskItem, error) {
+// taskItemFilters appends the WHERE/ORDER/LIMIT/OFFSET clauses shared by GetTaskItems and GetTaskItemsWithUsers.
+// tableAlias prefixes the filtered/ordered columns (task_id, state, sort_key, id), and is empty when the query
+// selects straight from an unaliased task_items.
+func taskItemFilters(query, tableAlias string, params *GetTaskItemsParams) (string, []any, error) {
 	if params != nil && params.Offset != nil && params.After != nil {
-		return nil, ErrConflictingPagination
+		return "", nil, ErrConflictingPagination
 	}
 
-	query := `
-		SELECT ` + taskItemColumns + `
-		FROM sirkel_engine.task_items
-		WHERE 1 = 1
-	`
+	col := func(name string) string {
+		if tableAlias == "" {
+			return name
+		}
+		return tableAlias + "." + name
+	}
+
 	var args []any
 
 	if params != nil && params.TaskID != nil {
 		args = append(args, *params.TaskID)
-		query += fmt.Sprintf(" AND task_id = $%d", len(args))
+		query += fmt.Sprintf(" AND %s = $%d", col("task_id"), len(args))
 	}
 
 	if params != nil && params.State != nil {
 		args = append(args, *params.State)
-		query += fmt.Sprintf(" AND state = $%d", len(args))
+		query += fmt.Sprintf(" AND %s = $%d", col("state"), len(args))
 	}
 
 	if params != nil && params.After != nil {
 		args = append(args, params.After.SortKey, params.After.ID)
-		query += fmt.Sprintf(" AND (sort_key, id) > ($%d, $%d)", len(args)-1, len(args))
+		query += fmt.Sprintf(" AND (%s, %s) > ($%d, $%d)", col("sort_key"), col("id"), len(args)-1, len(args))
 	}
 
-	query += " ORDER BY sort_key, id"
+	query += fmt.Sprintf(" ORDER BY %s, %s", col("sort_key"), col("id"))
 
 	if params != nil && params.Limit != nil {
 		args = append(args, *params.Limit)
@@ -296,6 +303,19 @@ func (h *TaskItemsRepositoryHandler) GetTaskItems(params *GetTaskItemsParams) ([
 		query += fmt.Sprintf(" OFFSET $%d", len(args))
 	}
 
+	return query, args, nil
+}
+
+func (h *TaskItemsRepositoryHandler) GetTaskItems(params *GetTaskItemsParams) ([]*sirkel_domain.TaskItem, error) {
+	query, args, err := taskItemFilters(`
+		SELECT `+taskItemColumns+`
+		FROM sirkel_engine.task_items
+		WHERE 1 = 1
+	`, "", params)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := h.pool.Query(h.ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -305,6 +325,113 @@ func (h *TaskItemsRepositoryHandler) GetTaskItems(params *GetTaskItemsParams) ([
 	var taskItems []*sirkel_domain.TaskItem
 	for rows.Next() {
 		taskItem, err := scanTaskItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		taskItems = append(taskItems, taskItem)
+	}
+
+	return taskItems, rows.Err()
+}
+
+// taskItemWithUsersSelect resolves each task item's creator and assignee from sirkel_engine.users. Either join
+// misses when the task item has no such user recorded, or the recorded user no longer exists.
+const taskItemWithUsersSelect = `
+	SELECT
+		ti.id, ti.task_id, ti.name, ti.description, ti.state, ti.sort_key, ti.assigned_user_id, ti.created_by, ti.updated_by, ti.created_at, ti.updated_at,
+		creator.id, creator.organization_id, creator.email, creator.role, creator.name, creator.first_surname, creator.second_surname, creator.phone,
+		assignee.id, assignee.organization_id, assignee.email, assignee.role, assignee.name, assignee.first_surname, assignee.second_surname, assignee.phone
+	FROM sirkel_engine.task_items ti
+	LEFT JOIN sirkel_engine.users creator ON creator.id = ti.created_by
+	LEFT JOIN sirkel_engine.users assignee ON assignee.id = ti.assigned_user_id
+	WHERE 1 = 1
+`
+
+// nullableUser scans a possibly-missing joined user row before it is converted to a *UserComplete.
+type nullableUser struct {
+	ID             *string
+	OrganizationID *string
+	Email          *string
+	Role           *string
+	Name           *string
+	FirstSurname   *string
+	SecondSurname  *string
+	Phone          *string
+}
+
+func (u nullableUser) toDomain() *sirkel_domain.UserComplete {
+	if u.ID == nil {
+		return nil
+	}
+
+	user := &sirkel_domain.UserComplete{ID: *u.ID, Phone: u.Phone}
+	if u.OrganizationID != nil {
+		user.OrganizationID = *u.OrganizationID
+	}
+	if u.Email != nil {
+		user.Email = *u.Email
+	}
+	if u.Role != nil {
+		user.Role = *u.Role
+	}
+	if u.Name != nil {
+		user.Name = *u.Name
+	}
+	if u.FirstSurname != nil {
+		user.FirstSurname = *u.FirstSurname
+	}
+	if u.SecondSurname != nil {
+		user.SecondSurname = *u.SecondSurname
+	}
+
+	return user
+}
+
+// scanTaskItemWithUsers reads a row selected with taskItemWithUsersSelect.
+func scanTaskItemWithUsers(row pgx.Row) (*sirkel_domain.TaskItemWithUsers, error) {
+	taskItem := &sirkel_domain.TaskItemWithUsers{}
+	var creator, assignee nullableUser
+
+	err := row.Scan(
+		&taskItem.ID,
+		&taskItem.TaskID,
+		&taskItem.Name,
+		&taskItem.Description,
+		&taskItem.State,
+		&taskItem.SortKey,
+		&taskItem.AssignedUserID,
+		&taskItem.CreatedBy,
+		&taskItem.UpdatedBy,
+		&taskItem.CreatedAt,
+		&taskItem.UpdatedAt,
+		&creator.ID, &creator.OrganizationID, &creator.Email, &creator.Role, &creator.Name, &creator.FirstSurname, &creator.SecondSurname, &creator.Phone,
+		&assignee.ID, &assignee.OrganizationID, &assignee.Email, &assignee.Role, &assignee.Name, &assignee.FirstSurname, &assignee.SecondSurname, &assignee.Phone,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	taskItem.CreatedByUser = creator.toDomain()
+	taskItem.AssignedUser = assignee.toDomain()
+
+	return taskItem, nil
+}
+
+func (h *TaskItemsRepositoryHandler) GetTaskItemsWithUsers(params *GetTaskItemsParams) ([]*sirkel_domain.TaskItemWithUsers, error) {
+	query, args, err := taskItemFilters(taskItemWithUsersSelect, "ti", params)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := h.pool.Query(h.ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var taskItems []*sirkel_domain.TaskItemWithUsers
+	for rows.Next() {
+		taskItem, err := scanTaskItemWithUsers(rows)
 		if err != nil {
 			return nil, err
 		}

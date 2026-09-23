@@ -122,6 +122,14 @@ type TaskItem struct {
 	UpdatedAt      time.Time     `json:"updated_at"`
 }
 
+// TaskItemWithUsers is a TaskItem with its creator and assignee resolved. Either is nil when the task item has no
+// such user recorded, or when the recorded user no longer exists.
+type TaskItemWithUsers struct {
+	TaskItem
+	CreatedByUser *UserComplete `json:"created_by_user,omitempty"`
+	AssignedUser  *UserComplete `json:"assigned_user,omitempty"`
+}
+
 // Cursor is a position in a list ordered by sort key: the sort key and ID of the last row already seen.
 type Cursor struct {
 	SortKey string `json:"sort_key"`
