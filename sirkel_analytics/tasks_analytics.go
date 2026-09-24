@@ -33,6 +33,15 @@ type GoalsProgressParams struct {
 	ProjectID *string
 }
 
+type OpenTasksParams struct {
+	ProjectID *string
+	GoalID    *string
+	// UserID limits the tasks to the ones the user is responsible for or has open items assigned in.
+	UserID *string
+	Offset *int
+	Limit  *int
+}
+
 type StaleTasksParams struct {
 	ProjectID *string
 	GoalID    *string
@@ -69,6 +78,10 @@ type TasksAnalytics interface {
 	CountTasksByState(params *CountTasksByStateParams) ([]sirkel_domain.TaskStateCount, error)
 	// GetGoalsProgress returns the task item progress of each goal, including goals without items.
 	GetGoalsProgress(params *GoalsProgressParams) ([]*sirkel_domain.GoalProgress, error)
+	// GetOpenTasks returns the todo, in-progress, in-review and blocked tasks, blocked first and then by workflow order, latest updated first.
+	// With a user it returns the tasks they are responsible for, with all their open items, and the tasks where they only have
+	// pending or in-progress items assigned, with just those items.
+	GetOpenTasks(params *OpenTasksParams) ([]*sirkel_domain.OpenTask, error)
 	// GetStaleTasks returns the in-progress, in-review and blocked tasks without activity for StaleAfter, stalest first.
 	GetStaleTasks(params *StaleTasksParams) ([]*sirkel_domain.StaleTask, error)
 	// GetUsersWorkload returns every user of the organization with the tasks they are responsible for and the items assigned to them.
@@ -213,6 +226,169 @@ func (h *TasksAnalyticsHandler) GetGoalsProgress(params *GoalsProgressParams) ([
 	}
 
 	return goals, nil
+}
+
+// openTaskStates are the task states where there is still work to do, and openItemStates the same for task items.
+const (
+	openTaskStates = `('todo', 'in-progress', 'in-review', 'blocked')`
+	openItemStates = `('pending', 'in-progress')`
+)
+
+func (h *TasksAnalyticsHandler) GetOpenTasks(params *OpenTasksParams) ([]*sirkel_domain.OpenTask, error) {
+	if params == nil {
+		params = &OpenTasksParams{}
+	}
+
+	conditions, args, err := h.scopeConditions(params.ProjectID, params.GoalID)
+	if err != nil {
+		return nil, err
+	}
+
+	conditions += " AND t.state IN " + openTaskStates
+	if params.UserID != nil {
+		args = append(args, *params.UserID)
+		conditions += fmt.Sprintf(` AND (t.responsible_user_id = $%[1]d OR EXISTS (
+			SELECT 1 FROM sirkel_engine.task_items ai
+			WHERE ai.task_id = t.id AND ai.assigned_user_id = $%[1]d AND ai.state IN `+openItemStates+`
+		))`, len(args))
+	}
+
+	query := `
+		SELECT t.id, t.goal_id, t.name, t.description, t.state, t.sort_key, t.responsible_user_id, t.created_by, t.updated_by, t.created_at, t.updated_at,
+			p.id, p.name, g.name
+		` + tasksInScope + `
+		WHERE ` + conditions + `
+		ORDER BY CASE t.state WHEN 'blocked' THEN 0 WHEN 'in-progress' THEN 1 WHEN 'in-review' THEN 2 ELSE 3 END, t.updated_at DESC, t.id
+	`
+
+	if params.Limit != nil {
+		args = append(args, *params.Limit)
+		query += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+
+	if params.Offset != nil {
+		args = append(args, *params.Offset)
+		query += fmt.Sprintf(" OFFSET $%d", len(args))
+	}
+
+	rows, err := h.pool.Query(h.ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var openTasks []*sirkel_domain.OpenTask
+	taskIDs := []string{}
+	byID := map[string]*sirkel_domain.OpenTask{}
+	for rows.Next() {
+		openTask := &sirkel_domain.OpenTask{}
+		task := &openTask.Task
+		if err := rows.Scan(
+			&task.ID,
+			&task.GoalID,
+			&task.Name,
+			&task.Description,
+			&task.State,
+			&task.SortKey,
+			&task.ResponsibleUserID,
+			&task.CreatedBy,
+			&task.UpdatedBy,
+			&task.CreatedAt,
+			&task.UpdatedAt,
+			&openTask.ProjectID,
+			&openTask.ProjectName,
+			&openTask.GoalName,
+		); err != nil {
+			return nil, err
+		}
+		openTask.Responsible = params.UserID != nil && task.ResponsibleUserID != nil && *task.ResponsibleUserID == *params.UserID
+		openTask.OpenItems = []sirkel_domain.TaskItem{}
+
+		openTasks = append(openTasks, openTask)
+		taskIDs = append(taskIDs, task.ID)
+		byID[task.ID] = openTask
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	if len(openTasks) == 0 {
+		return openTasks, nil
+	}
+
+	countRows, err := h.pool.Query(h.ctx, `
+		SELECT task_id, state, count(*) FROM sirkel_engine.task_items
+		WHERE task_id = ANY($1::uuid[])
+		GROUP BY task_id, state
+	`, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer countRows.Close()
+
+	countsByTask := map[string]map[sirkel_domain.TaskItemState]int{}
+	for countRows.Next() {
+		var taskID string
+		var state sirkel_domain.TaskItemState
+		var count int
+		if err := countRows.Scan(&taskID, &state, &count); err != nil {
+			return nil, err
+		}
+		if countsByTask[taskID] == nil {
+			countsByTask[taskID] = map[sirkel_domain.TaskItemState]int{}
+		}
+		countsByTask[taskID][state] = count
+	}
+	if err := countRows.Err(); err != nil {
+		return nil, err
+	}
+	countRows.Close()
+
+	for _, openTask := range openTasks {
+		openTask.TaskItemStateCounts = taskItemStateCounts(countsByTask[openTask.Task.ID])
+	}
+
+	// On a task the user is not responsible for, they only see their own items.
+	itemQuery := `
+		SELECT ti.id, ti.task_id, ti.name, ti.description, ti.state, ti.sort_key, ti.assigned_user_id, ti.created_by, ti.updated_by, ti.created_at, ti.updated_at
+		FROM sirkel_engine.task_items ti
+		JOIN sirkel_engine.tasks t ON t.id = ti.task_id
+		WHERE ti.task_id = ANY($1::uuid[]) AND ti.state IN ` + openItemStates
+	itemArgs := []any{taskIDs}
+	if params.UserID != nil {
+		itemQuery += " AND (t.responsible_user_id = $2 OR ti.assigned_user_id = $2)"
+		itemArgs = append(itemArgs, *params.UserID)
+	}
+	itemQuery += " ORDER BY ti.sort_key, ti.id"
+
+	itemRows, err := h.pool.Query(h.ctx, itemQuery, itemArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer itemRows.Close()
+
+	for itemRows.Next() {
+		var item sirkel_domain.TaskItem
+		if err := itemRows.Scan(
+			&item.ID,
+			&item.TaskID,
+			&item.Name,
+			&item.Description,
+			&item.State,
+			&item.SortKey,
+			&item.AssignedUserID,
+			&item.CreatedBy,
+			&item.UpdatedBy,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		byID[item.TaskID].OpenItems = append(byID[item.TaskID].OpenItems, item)
+	}
+
+	return openTasks, itemRows.Err()
 }
 
 func (h *TasksAnalyticsHandler) GetStaleTasks(params *StaleTasksParams) ([]*sirkel_domain.StaleTask, error) {

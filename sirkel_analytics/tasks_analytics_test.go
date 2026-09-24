@@ -114,6 +114,8 @@ func TestTasksAnalytics_RequireOrganization(t *testing.T) {
 			requireError(t, err, ErrOrganizationRequired)
 			_, err = handler.GetGoalsProgress(nil)
 			requireError(t, err, ErrOrganizationRequired)
+			_, err = handler.GetOpenTasks(nil)
+			requireError(t, err, ErrOrganizationRequired)
 			_, err = handler.GetStaleTasks(nil)
 			requireError(t, err, ErrOrganizationRequired)
 			_, err = handler.GetUsersWorkload(nil)
@@ -183,6 +185,111 @@ func TestTasksAnalytics_GetGoalsProgress(t *testing.T) {
 	}
 	if len(all) != 3 || all[0].GoalID != goalOfB.ID {
 		t.Fatalf("expected the organization's 3 goals, newest first, got %+v", all)
+	}
+}
+
+func TestTasksAnalytics_GetOpenTasks(t *testing.T) {
+	pool := testPool(t)
+	tn := newTenant(t, pool, "owner@a.test")
+	other := newTenant(t, pool, "owner@b.test")
+	me := tn.user.ID
+	colleague := createTestUser(t, pool, tn.organizationID, "colleague@a.test").ID
+
+	project := tn.project("Project")
+	goal := tn.goal(project.ID, "Goal")
+
+	blocked := tn.task(goal.ID, "blocked", sirkel_domain.TaskStateBlocked)
+	inProgress := tn.task(goal.ID, "in progress", sirkel_domain.TaskStateInProgress)
+	inReview := tn.task(goal.ID, "in review", sirkel_domain.TaskStateInReview)
+	todo := tn.task(goal.ID, "todo", sirkel_domain.TaskStateTodo)
+	done := tn.task(goal.ID, "done", sirkel_domain.TaskStateDone)
+	cancelled := tn.task(goal.ID, "cancelled", sirkel_domain.TaskStateCancelled)
+
+	// I'm responsible for the in-progress task, the blocked task is a colleague's where I only have an item.
+	// On the in-review task I only have items that are finished, and the todo task is a colleague's.
+	tn.exec(`UPDATE sirkel_engine.tasks SET responsible_user_id = $2 WHERE id = $1`, inProgress.ID, me)
+	tn.exec(`UPDATE sirkel_engine.tasks SET responsible_user_id = $2 WHERE id = $1`, blocked.ID, colleague)
+	tn.exec(`UPDATE sirkel_engine.tasks SET responsible_user_id = $2 WHERE id = $1`, todo.ID, colleague)
+	tn.exec(`UPDATE sirkel_engine.tasks SET responsible_user_id = $2 WHERE id = $1`, done.ID, me)
+	tn.exec(`UPDATE sirkel_engine.tasks SET responsible_user_id = $2 WHERE id = $1`, cancelled.ID, me)
+
+	myPending := tn.taskItem(inProgress.ID, "my pending", sirkel_domain.TaskItemStatePending, &me)
+	tn.taskItem(inProgress.ID, "my done", sirkel_domain.TaskItemStateDone, &me)
+	colleagueItem := tn.taskItem(inProgress.ID, "colleague item", sirkel_domain.TaskItemStateInProgress, &colleague)
+	myBlockedItem := tn.taskItem(blocked.ID, "my item", sirkel_domain.TaskItemStateInProgress, &me)
+	tn.taskItem(blocked.ID, "my cancelled", sirkel_domain.TaskItemStateCancelled, &me)
+	tn.taskItem(inReview.ID, "my finished item", sirkel_domain.TaskItemStateDone, &me)
+	tn.taskItem(done.ID, "item of a done task", sirkel_domain.TaskItemStatePending, &me)
+
+	otherGoal := other.goal(other.project("Other").ID, "Other goal")
+	other.task(otherGoal.ID, "other org", sirkel_domain.TaskStateBlocked)
+
+	// Without a user: every open task, blocked first and then in workflow order.
+	tasks, err := tn.analytics.Tasks.GetOpenTasks(nil)
+	if err != nil {
+		t.Fatalf("GetOpenTasks() error = %v", err)
+	}
+	if len(tasks) != 4 {
+		t.Fatalf("expected 4 open tasks, got %d: %+v", len(tasks), tasks)
+	}
+	for i, want := range []*sirkel_domain.Task{blocked, inProgress, inReview, todo} {
+		if tasks[i].Task.ID != want.ID {
+			t.Fatalf("open task %d: expected %q, got %q", i, want.Name, tasks[i].Task.Name)
+		}
+	}
+	if tasks[0].ProjectID != project.ID || tasks[0].ProjectName != "Project" || tasks[0].GoalName != "Goal" {
+		t.Fatalf("expected the project and goal of the task, got %+v", tasks[0])
+	}
+	if tasks[1].Responsible {
+		t.Fatalf("expected no responsible flag without a user")
+	}
+	if len(tasks[1].OpenItems) != 2 {
+		t.Fatalf("expected the 2 open items of the in-progress task, got %+v", tasks[1].OpenItems)
+	}
+	assertTaskItemStateCounts(t, tasks[1].TaskItemStateCounts, 1, 1, 1, 0)
+	assertTaskItemStateCounts(t, tasks[3].TaskItemStateCounts, 0, 0, 0, 0)
+	if tasks[3].OpenItems == nil || len(tasks[3].OpenItems) != 0 {
+		t.Fatalf("expected an empty list of open items, got %+v", tasks[3].OpenItems)
+	}
+
+	// With my user: the task I'm responsible for, and the one where I only have an open item.
+	// On the second one a colleague also has an open item, which I don't see.
+	tn.taskItem(blocked.ID, "colleague item on blocked", sirkel_domain.TaskItemStatePending, &colleague)
+	tasks, err = tn.analytics.Tasks.GetOpenTasks(&OpenTasksParams{UserID: &me})
+	if err != nil {
+		t.Fatalf("GetOpenTasks() for user error = %v", err)
+	}
+	if len(tasks) != 2 || tasks[0].Task.ID != blocked.ID || tasks[1].Task.ID != inProgress.ID {
+		t.Fatalf("expected the blocked and in-progress tasks, got %+v", tasks)
+	}
+	if tasks[0].Responsible || !tasks[1].Responsible {
+		t.Fatalf("expected to be responsible only for the in-progress task, got %v and %v", tasks[0].Responsible, tasks[1].Responsible)
+	}
+	if len(tasks[0].OpenItems) != 1 || tasks[0].OpenItems[0].ID != myBlockedItem.ID {
+		t.Fatalf("expected only my open item on the blocked task, got %+v", tasks[0].OpenItems)
+	}
+	// I'm responsible for the in-progress task, so I see all its open items, and not the finished one.
+	if len(tasks[1].OpenItems) != 2 || tasks[1].OpenItems[0].ID != myPending.ID || tasks[1].OpenItems[1].ID != colleagueItem.ID {
+		t.Fatalf("expected all the open items of the in-progress task, got %+v", tasks[1].OpenItems)
+	}
+	// Progress still covers the items of everyone.
+	assertTaskItemStateCounts(t, tasks[1].TaskItemStateCounts, 1, 1, 1, 0)
+
+	limit, offset := 1, 1
+	tasks, err = tn.analytics.Tasks.GetOpenTasks(&OpenTasksParams{Limit: &limit, Offset: &offset})
+	if err != nil {
+		t.Fatalf("GetOpenTasks() page error = %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Task.ID != inProgress.ID {
+		t.Fatalf("expected the second open task, got %+v", tasks)
+	}
+
+	tasks, err = tn.analytics.Tasks.GetOpenTasks(&OpenTasksParams{GoalID: &otherGoal.ID})
+	if err != nil {
+		t.Fatalf("GetOpenTasks() other organization goal error = %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("expected no tasks for a goal of another organization, got %+v", tasks)
 	}
 }
 

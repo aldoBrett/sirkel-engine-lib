@@ -23,6 +23,21 @@ type StaleTask struct {
 	LastActivityAt time.Time `json:"last_activity_at"`
 }
 
+// OpenTask is a task that is not done or cancelled, with where it lives and the progress of its items.
+type OpenTask struct {
+	Task        Task   `json:"task"`
+	ProjectID   string `json:"project_id"`
+	ProjectName string `json:"project_name"`
+	GoalName    string `json:"goal_name"`
+	// Responsible is true when the requested user is responsible for the task. It is always false without a user.
+	Responsible bool `json:"responsible"`
+	// TaskItemStateCounts covers every item of the task, whoever they are assigned to.
+	TaskItemStateCounts []TaskItemStateCount `json:"task_item_state_counts"`
+	// OpenItems are the pending and in-progress items. With a user, all of them when they are responsible for the task,
+	// and only the ones assigned to them when they are not.
+	OpenItems []TaskItem `json:"open_items"`
+}
+
 type UserWorkload struct {
 	UserID            string               `json:"user_id"`
 	Email             string               `json:"email"`
