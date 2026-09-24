@@ -270,6 +270,12 @@ func TestTasksAnalytics_GetOpenTasks(t *testing.T) {
 	if len(tasks[0].OpenItems) != 1 || tasks[0].OpenItems[0].ID != myBlockedItem.ID {
 		t.Fatalf("expected only my open item on the blocked task, got %+v", tasks[0].OpenItems)
 	}
+	if email := tasks[1].OpenItems[0].AssignedUserEmail; email == nil || *email != "owner@a.test" {
+		t.Fatalf("expected my email on my item, got %v", email)
+	}
+	if email := tasks[1].OpenItems[1].AssignedUserEmail; email == nil || *email != "colleague@a.test" {
+		t.Fatalf("expected the colleague's email on their item, got %v", email)
+	}
 	// I'm responsible for the in-progress task, so I see all its open items, and not the finished one.
 	if len(tasks[1].OpenItems) != 2 || tasks[1].OpenItems[0].ID != myPending.ID || tasks[1].OpenItems[1].ID != colleagueItem.ID {
 		t.Fatalf("expected all the open items of the in-progress task, got %+v", tasks[1].OpenItems)

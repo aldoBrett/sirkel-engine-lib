@@ -330,7 +330,7 @@ func (h *TasksAnalyticsHandler) GetOpenTasks(params *OpenTasksParams) ([]*sirkel
 			return nil, err
 		}
 		openTask.Responsible = params.UserID != nil && task.ResponsibleUserID != nil && *task.ResponsibleUserID == *params.UserID
-		openTask.OpenItems = []sirkel_domain.TaskItem{}
+		openTask.OpenItems = []sirkel_domain.OpenTaskItem{}
 
 		openTasks = append(openTasks, openTask)
 		taskIDs = append(taskIDs, task.ID)
@@ -379,9 +379,10 @@ func (h *TasksAnalyticsHandler) GetOpenTasks(params *OpenTasksParams) ([]*sirkel
 
 	// On a task the user is not responsible for, they only see their own items.
 	itemQuery := `
-		SELECT ti.id, ti.task_id, ti.name, ti.description, ti.state, ti.sort_key, ti.assigned_user_id, ti.created_by, ti.updated_by, ti.created_at, ti.updated_at
+		SELECT ti.id, ti.task_id, ti.name, ti.description, ti.state, ti.sort_key, ti.assigned_user_id, ti.created_by, ti.updated_by, ti.created_at, ti.updated_at, u.email
 		FROM sirkel_engine.task_items ti
 		JOIN sirkel_engine.tasks t ON t.id = ti.task_id
+		LEFT JOIN sirkel_engine.users u ON u.id = ti.assigned_user_id
 		WHERE ti.task_id = ANY($1::uuid[]) AND ti.state IN ` + openItemStates
 	itemArgs := []any{taskIDs}
 	if params.UserID != nil {
@@ -397,7 +398,7 @@ func (h *TasksAnalyticsHandler) GetOpenTasks(params *OpenTasksParams) ([]*sirkel
 	defer itemRows.Close()
 
 	for itemRows.Next() {
-		var item sirkel_domain.TaskItem
+		var item sirkel_domain.OpenTaskItem
 		if err := itemRows.Scan(
 			&item.ID,
 			&item.TaskID,
@@ -410,6 +411,7 @@ func (h *TasksAnalyticsHandler) GetOpenTasks(params *OpenTasksParams) ([]*sirkel
 			&item.UpdatedBy,
 			&item.CreatedAt,
 			&item.UpdatedAt,
+			&item.AssignedUserEmail,
 		); err != nil {
 			return nil, err
 		}

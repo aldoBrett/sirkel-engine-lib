@@ -23,6 +23,12 @@ type StaleTask struct {
 	LastActivityAt time.Time `json:"last_activity_at"`
 }
 
+// OpenTaskItem is a task item with the email of the user it is assigned to, which is nil when it has no assignee.
+type OpenTaskItem struct {
+	TaskItem
+	AssignedUserEmail *string `json:"assigned_user_email,omitempty"`
+}
+
 // OpenTask is a task that is not done or cancelled, with where it lives and the progress of its items.
 type OpenTask struct {
 	Task        Task   `json:"task"`
@@ -35,7 +41,7 @@ type OpenTask struct {
 	TaskItemStateCounts []TaskItemStateCount `json:"task_item_state_counts"`
 	// OpenItems are the pending and in-progress items. With a user, all of them when they are responsible for the task,
 	// and only the ones assigned to them when they are not.
-	OpenItems []TaskItem `json:"open_items"`
+	OpenItems []OpenTaskItem `json:"open_items"`
 }
 
 type UserWorkload struct {
