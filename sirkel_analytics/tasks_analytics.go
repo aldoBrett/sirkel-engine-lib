@@ -82,6 +82,8 @@ type TasksAnalytics interface {
 	// With a user it returns the tasks they are responsible for, with all their open items, and the tasks where they only have
 	// pending or in-progress items assigned, with just those items.
 	GetOpenTasks(params *OpenTasksParams) ([]*sirkel_domain.OpenTask, error)
+	// CountOpenTasks returns the total number of tasks GetOpenTasks matches, ignoring its Limit and Offset, to paginate over.
+	CountOpenTasks(params *OpenTasksParams) (int, error)
 	// GetStaleTasks returns the in-progress, in-review and blocked tasks without activity for StaleAfter, stalest first.
 	GetStaleTasks(params *StaleTasksParams) ([]*sirkel_domain.StaleTask, error)
 	// GetUsersWorkload returns every user of the organization with the tasks they are responsible for and the items assigned to them.
@@ -234,14 +236,11 @@ const (
 	openItemStates = `('pending', 'in-progress')`
 )
 
-func (h *TasksAnalyticsHandler) GetOpenTasks(params *OpenTasksParams) ([]*sirkel_domain.OpenTask, error) {
-	if params == nil {
-		params = &OpenTasksParams{}
-	}
-
+// openTasksConditions returns the WHERE conditions, and their arguments, for the open tasks matching the params.
+func (h *TasksAnalyticsHandler) openTasksConditions(params *OpenTasksParams) (string, []any, error) {
 	conditions, args, err := h.scopeConditions(params.ProjectID, params.GoalID)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	conditions += " AND t.state IN " + openTaskStates
@@ -251,6 +250,35 @@ func (h *TasksAnalyticsHandler) GetOpenTasks(params *OpenTasksParams) ([]*sirkel
 			SELECT 1 FROM sirkel_engine.task_items ai
 			WHERE ai.task_id = t.id AND ai.assigned_user_id = $%[1]d AND ai.state IN `+openItemStates+`
 		))`, len(args))
+	}
+
+	return conditions, args, nil
+}
+
+// CountOpenTasks returns how many tasks GetOpenTasks would return without Limit and Offset.
+func (h *TasksAnalyticsHandler) CountOpenTasks(params *OpenTasksParams) (int, error) {
+	if params == nil {
+		params = &OpenTasksParams{}
+	}
+
+	conditions, args, err := h.openTasksConditions(params)
+	if err != nil {
+		return 0, err
+	}
+
+	var count int
+	err = h.pool.QueryRow(h.ctx, `SELECT count(*) `+tasksInScope+` WHERE `+conditions, args...).Scan(&count)
+	return count, err
+}
+
+func (h *TasksAnalyticsHandler) GetOpenTasks(params *OpenTasksParams) ([]*sirkel_domain.OpenTask, error) {
+	if params == nil {
+		params = &OpenTasksParams{}
+	}
+
+	conditions, args, err := h.openTasksConditions(params)
+	if err != nil {
+		return nil, err
 	}
 
 	query := `

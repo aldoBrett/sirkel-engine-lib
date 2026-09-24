@@ -116,6 +116,8 @@ func TestTasksAnalytics_RequireOrganization(t *testing.T) {
 			requireError(t, err, ErrOrganizationRequired)
 			_, err = handler.GetOpenTasks(nil)
 			requireError(t, err, ErrOrganizationRequired)
+			_, err = handler.CountOpenTasks(nil)
+			requireError(t, err, ErrOrganizationRequired)
 			_, err = handler.GetStaleTasks(nil)
 			requireError(t, err, ErrOrganizationRequired)
 			_, err = handler.GetUsersWorkload(nil)
@@ -282,6 +284,27 @@ func TestTasksAnalytics_GetOpenTasks(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].Task.ID != inProgress.ID {
 		t.Fatalf("expected the second open task, got %+v", tasks)
+	}
+
+	// The total ignores the page, and follows the other filters.
+	for name, tc := range map[string]struct {
+		params *OpenTasksParams
+		want   int
+	}{
+		"everyone":     {nil, 4},
+		"page ignored": {&OpenTasksParams{Limit: &limit, Offset: &offset}, 4},
+		"me":           {&OpenTasksParams{UserID: &me}, 2},
+		"colleague":    {&OpenTasksParams{UserID: &colleague}, 3},
+		"goal":         {&OpenTasksParams{GoalID: &goal.ID}, 4},
+		"other org":    {&OpenTasksParams{GoalID: &otherGoal.ID}, 0},
+	} {
+		count, err := tn.analytics.Tasks.CountOpenTasks(tc.params)
+		if err != nil {
+			t.Fatalf("CountOpenTasks() %s error = %v", name, err)
+		}
+		if count != tc.want {
+			t.Fatalf("CountOpenTasks() %s: expected %d, got %d", name, tc.want, count)
+		}
 	}
 
 	tasks, err = tn.analytics.Tasks.GetOpenTasks(&OpenTasksParams{GoalID: &otherGoal.ID})
