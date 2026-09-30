@@ -26,16 +26,24 @@ func (h *SirkelAuthHandler) RefreshToken() (RefreshTokenResponse, error) {
 		return RefreshTokenResponse{}, sirkel_errors.New(sirkel_errors.CodeUserIDRequired, "an authenticated user is required")
 	}
 
-	var userID, organizationID uuid.UUID
+	return h.tokenForCurrentState(context.Background(), h.User.ID)
+}
+
+// tokenForCurrentState reads a user's current role/organization/email from
+// the database and issues a token for it. ChangeOrganization builds its
+// response on this too, once it has switched the user's current
+// organization.
+func (h *SirkelAuthHandler) tokenForCurrentState(ctx context.Context, userID string) (RefreshTokenResponse, error) {
+	var id, organizationID uuid.UUID
 	var role, email string
-	err := h.Pool.QueryRow(context.Background(), `
+	err := h.Pool.QueryRow(ctx, `
 		SELECT id, role, email, organization_id FROM sirkel_engine.users WHERE id = $1
-	`, h.User.ID).Scan(&userID, &role, &email, &organizationID)
+	`, userID).Scan(&id, &role, &email, &organizationID)
 	if err != nil {
 		return RefreshTokenResponse{}, sirkel_errors.Wrap(sirkel_errors.CodeUserNotFound, "user not found", err)
 	}
 
-	token, err := issueToken(userID, role, organizationID)
+	token, err := issueToken(id, role, organizationID)
 	if err != nil {
 		return RefreshTokenResponse{}, err
 	}

@@ -18,6 +18,39 @@ func (h *SirkelAuthHandler) requireSuperAdmin() error {
 	return nil
 }
 
+// setCurrentOrganization makes organizationID the user's current one:
+// unsets is_current on whatever membership held it, sets it there (creating
+// the membership if it doesn't exist yet), and syncs the legacy
+// users.organization_id/role snapshot to match. Both MoveUserOrganization
+// (a super_admin moving someone, possibly into a brand new membership) and
+// ChangeOrganization (a user switching between orgs they already belong to)
+// build on this.
+func setCurrentOrganization(ctx context.Context, tx pgx.Tx, userID, organizationID, role string) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE sirkel_engine.user_organizations SET is_current = false, updated_at = NOW()
+		WHERE user_id = $1 AND is_current
+	`, userID); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO sirkel_engine.user_organizations (user_id, organization_id, role, is_current)
+		VALUES ($1, $2, $3, true)
+		ON CONFLICT (user_id, organization_id)
+		DO UPDATE SET is_current = true, role = EXCLUDED.role, updated_at = NOW()
+	`, userID, organizationID, role); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE sirkel_engine.users SET organization_id = $2, role = $3, updated_at = NOW() WHERE id = $1
+	`, userID, organizationID, role); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 type AddMembershipParams struct {
 	UserID         string `json:"user_id"`
 	OrganizationID string `json:"organization_id"`
@@ -112,11 +145,17 @@ type MoveUserOrganizationParams struct {
 	Role string `json:"role,omitempty"`
 }
 
-// MoveUserOrganization makes OrganizationID the user's current organization.
-// It does not delete their membership in whatever organization was current
-// before the move — that membership just stops being current, and can be
-// removed separately with RemoveMembership if the user is leaving it for
-// good. This also keeps users.organization_id/role (the legacy columns
+// MoveUserOrganization is the super_admin-only, privileged counterpart to
+// ChangeOrganization: it can move a user into an organization they don't
+// already belong to (creating that membership on the spot), which is why it
+// requires an actor and, for a brand new membership, a Role. A user
+// switching between organizations they already belong to should call
+// ChangeOrganization themselves instead.
+//
+// It does not delete the user's membership in whatever organization was
+// current before the move — that membership just stops being current, and
+// can be removed separately with RemoveMembership if the user is leaving it
+// for good. This also keeps users.organization_id/role (the legacy columns
 // several queries still join on) in sync with the new current membership.
 //
 // It does not touch the moved user's existing token: JWTs are self-contained,
@@ -152,25 +191,7 @@ func (h *SirkelAuthHandler) MoveUserOrganization(params MoveUserOrganizationPara
 		}
 	}
 
-	if _, err := tx.Exec(ctx, `
-		UPDATE sirkel_engine.user_organizations SET is_current = false, updated_at = NOW()
-		WHERE user_id = $1 AND is_current
-	`, params.UserID); err != nil {
-		return sirkel_errors.Wrap(sirkel_errors.CodeMoveUserOrganizationFailed, "failed to move user", err)
-	}
-
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO sirkel_engine.user_organizations (user_id, organization_id, role, is_current)
-		VALUES ($1, $2, $3, true)
-		ON CONFLICT (user_id, organization_id)
-		DO UPDATE SET is_current = true, role = EXCLUDED.role, updated_at = NOW()
-	`, params.UserID, params.OrganizationID, params.Role); err != nil {
-		return sirkel_errors.Wrap(sirkel_errors.CodeMoveUserOrganizationFailed, "failed to move user", err)
-	}
-
-	if _, err := tx.Exec(ctx, `
-		UPDATE sirkel_engine.users SET organization_id = $2, role = $3, updated_at = NOW() WHERE id = $1
-	`, params.UserID, params.OrganizationID, params.Role); err != nil {
+	if err := setCurrentOrganization(ctx, tx, params.UserID, params.OrganizationID, params.Role); err != nil {
 		return sirkel_errors.Wrap(sirkel_errors.CodeMoveUserOrganizationFailed, "failed to move user", err)
 	}
 

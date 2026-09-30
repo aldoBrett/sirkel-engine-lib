@@ -40,4 +40,5 @@ const (
 	CodeCannotRemoveCurrentOrgMembership Code = "cannot_remove_current_organization_membership"
 	CodeMoveUserOrganizationFailed       Code = "move_user_organization_failed"
 	CodeUserOrganizationsIndexFailed     Code = "user_organizations_index_failed"
+	CodeChangeOrganizationFailed         Code = "change_organization_failed"
 )
