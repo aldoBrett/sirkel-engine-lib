@@ -118,6 +118,10 @@ type MoveUserOrganizationParams struct {
 // removed separately with RemoveMembership if the user is leaving it for
 // good. This also keeps users.organization_id/role (the legacy columns
 // several queries still join on) in sync with the new current membership.
+//
+// It does not touch the moved user's existing token: JWTs are self-contained,
+// so there is nothing here to push an update into. That token keeps carrying
+// the old organization/role until it expires or the user calls RefreshToken.
 func (h *SirkelAuthHandler) MoveUserOrganization(params MoveUserOrganizationParams) error {
 	if err := h.requireSuperAdmin(); err != nil {
 		return err

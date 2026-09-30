@@ -2,11 +2,9 @@ package sirkel_auth
 
 import (
 	"context"
-	"os"
 	"sirkel-engine-lib/sirkel_errors"
 	"time"
 
-	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -49,18 +47,9 @@ func (h *SirkelAuthHandler) Login(params LoginParams) (LoginResponse, error) {
 		return LoginResponse{}, sirkel_errors.Wrap(sirkel_errors.CodeInvalidCredentials, "credenciales inválidas", err)
 	}
 
-	// Generate JWT token
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"id":              userID.String(),
-		"role":            role,
-		"exp":             time.Now().Add(time.Hour * 72).Unix(),
-		"organization_id": organizationID,
-		"platform":        "sirkel",
-	})
-	secret := os.Getenv("JWT_SECRET")
-	t, err := token.SignedString([]byte(secret))
+	t, err := issueToken(userID, role, organizationID)
 	if err != nil {
-		return LoginResponse{}, sirkel_errors.Wrap(sirkel_errors.CodeTokenGenerationFailed, "error generando el token", err)
+		return LoginResponse{}, err
 	}
 
 	return LoginResponse{
