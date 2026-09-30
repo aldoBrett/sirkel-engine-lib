@@ -131,18 +131,32 @@ func insertTestOrganization(t *testing.T, pool *pgxpool.Pool, name string) strin
 
 // insertTestUser inserts a user directly, bypassing CreateUser, and returns
 // its id. passwordHash is stored as-is, so callers wanting to exercise Login
-// should pass a real bcrypt hash.
+// should pass a real bcrypt hash. It also inserts the matching current
+// membership row in user_organizations, mirroring what CreateUser does, so
+// that code reading through user_organizations sees the same state as code
+// still reading users.organization_id/role.
 func insertTestUser(t *testing.T, pool *pgxpool.Pool, organizationID, email, passwordHash, role string) string {
 	t.Helper()
 
+	ctx := context.Background()
 	var userID string
-	err := pool.QueryRow(context.Background(), `
+	err := pool.QueryRow(ctx, `
 		INSERT INTO sirkel_engine.users (id, organization_id, role, name, first_surname, second_surname, email, password_hash)
 		VALUES ($1, $2, $3, 'Test', 'Surname', 'SecondSurname', $4, $5)
 		RETURNING id
 	`, testUUID(t), organizationID, role, email, passwordHash).Scan(&userID)
 	if err != nil {
 		t.Fatalf("unable to create test user: %v", err)
+	}
+
+	if organizationID != "" {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO sirkel_engine.user_organizations (user_id, organization_id, role, is_current)
+			VALUES ($1, $2, $3, true)
+		`, userID, organizationID, role)
+		if err != nil {
+			t.Fatalf("unable to create test user membership: %v", err)
+		}
 	}
 
 	return userID

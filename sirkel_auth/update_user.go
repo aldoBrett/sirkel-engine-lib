@@ -10,16 +10,17 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// UpdateUserParams updates a user's own profile fields. Organization
+// membership and per-organization role are no longer set here: use
+// AddMembership, RemoveMembership, and MoveUserOrganization instead.
 type UpdateUserParams struct {
-	UserID         string  `json:"user_id"`
-	Email          *string `json:"email,omitempty"`
-	Password       *string `json:"password,omitempty"`
-	Name           *string `json:"name,omitempty"`
-	FirstSurname   *string `json:"first_surname,omitempty"`
-	SecondSurname  *string `json:"second_surname,omitempty"`
-	Phone          *string `json:"phone,omitempty"`
-	Role           *string `json:"role,omitempty"`
-	OrganizationID *string `json:"organization_id,omitempty"`
+	UserID        string  `json:"user_id"`
+	Email         *string `json:"email,omitempty"`
+	Password      *string `json:"password,omitempty"`
+	Name          *string `json:"name,omitempty"`
+	FirstSurname  *string `json:"first_surname,omitempty"`
+	SecondSurname *string `json:"second_surname,omitempty"`
+	Phone         *string `json:"phone,omitempty"`
 }
 
 func (h *SirkelAuthHandler) UpdateUser(params UpdateUserParams) error {
@@ -49,12 +50,6 @@ func (h *SirkelAuthHandler) UpdateUser(params UpdateUserParams) error {
 	}
 	if params.Phone != nil {
 		addSet("phone", *params.Phone)
-	}
-	if params.Role != nil {
-		addSet("role", *params.Role)
-	}
-	if params.OrganizationID != nil {
-		addSet("organization_id", *params.OrganizationID)
 	}
 	if params.Password != nil {
 		hash, err := bcrypt.GenerateFromPassword([]byte(*params.Password), 10)

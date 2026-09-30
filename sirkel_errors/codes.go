@@ -30,4 +30,14 @@ const (
 	CodeUserUpdateFailed Code = "user_update_failed"
 
 	CodeUsersIndexFailed Code = "users_index_failed"
+
+	CodeForbidden Code = "forbidden"
+
+	CodeRoleRequired                     Code = "role_required"
+	CodeMembershipAddFailed              Code = "membership_add_failed"
+	CodeMembershipRemoveFailed           Code = "membership_remove_failed"
+	CodeMembershipNotFound               Code = "membership_not_found"
+	CodeCannotRemoveCurrentOrgMembership Code = "cannot_remove_current_organization_membership"
+	CodeMoveUserOrganizationFailed       Code = "move_user_organization_failed"
+	CodeUserOrganizationsIndexFailed     Code = "user_organizations_index_failed"
 )

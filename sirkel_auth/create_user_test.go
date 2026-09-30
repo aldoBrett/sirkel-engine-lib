@@ -48,6 +48,25 @@ func TestSirkelAuthHandler_CreateUser_Insert(t *testing.T) {
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte("s3cret!")); err != nil {
 		t.Fatalf("expected password hash to match, got error: %v", err)
 	}
+
+	var userID, membershipRole string
+	var isCurrent bool
+	row = pool.QueryRow(context.Background(), `SELECT id FROM sirkel_engine.users WHERE email = $1`, "new-user@example.com")
+	if err := row.Scan(&userID); err != nil {
+		t.Fatalf("unable to read user id: %v", err)
+	}
+	row = pool.QueryRow(context.Background(), `
+		SELECT role, is_current FROM sirkel_engine.user_organizations WHERE user_id = $1 AND organization_id = $2
+	`, userID, organizationID)
+	if err := row.Scan(&membershipRole, &isCurrent); err != nil {
+		t.Fatalf("unable to read membership: %v", err)
+	}
+	if membershipRole != "user" {
+		t.Fatalf("expected membership role %q, got %q", "user", membershipRole)
+	}
+	if !isCurrent {
+		t.Fatalf("expected membership to be current")
+	}
 }
 
 func TestSirkelAuthHandler_CreateUser_RequiredFields(t *testing.T) {

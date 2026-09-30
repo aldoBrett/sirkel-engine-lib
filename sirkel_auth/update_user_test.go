@@ -17,12 +17,10 @@ func TestSirkelAuthHandler_UpdateUser_UpdatesFields(t *testing.T) {
 	h := NewSirkelAuthHandler(SirkelAuthHandlerParams{Pool: pool})
 	newEmail := "updated@example.com"
 	newName := "Updated Name"
-	newRole := "admin"
 	err := h.UpdateUser(UpdateUserParams{
 		UserID: userID,
 		Email:  &newEmail,
 		Name:   &newName,
-		Role:   &newRole,
 	})
 	if err != nil {
 		t.Fatalf("UpdateUser() error = %v", err)
@@ -39,8 +37,10 @@ func TestSirkelAuthHandler_UpdateUser_UpdatesFields(t *testing.T) {
 	if name != newName {
 		t.Fatalf("expected name %q, got %q", newName, name)
 	}
-	if role != newRole {
-		t.Fatalf("expected role %q, got %q", newRole, role)
+	// Role isn't settable through UpdateUser anymore (it's per-organization now),
+	// so it should be untouched.
+	if role != "user" {
+		t.Fatalf("expected role to remain unchanged, got %q", role)
 	}
 	if firstSurname != "Surname" {
 		t.Fatalf("expected first_surname to remain unchanged, got %q", firstSurname)

@@ -27,3 +27,15 @@ type UserComplete struct {
 	Phone          *string `json:"phone"`
 	// PasswordHash   string `json:"password_hash"`
 }
+
+// UserOrganization is one row of a user's membership in an organization
+// (sirkel_engine.user_organizations). Role lives here, not on User, because a
+// user's role can differ between the organizations they belong to. IsCurrent
+// marks the single membership a user is currently operating under; it is
+// what a login token is issued for.
+type UserOrganization struct {
+	UserID         string `json:"user_id"`
+	OrganizationID string `json:"organization_id"`
+	Role           string `json:"role"`
+	IsCurrent      bool   `json:"is_current"`
+}
