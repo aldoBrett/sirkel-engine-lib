@@ -37,6 +37,9 @@ func TestSirkelAuthHandler_Login_Success(t *testing.T) {
 	if resp.Role != "admin" {
 		t.Fatalf("expected role %q, got %q", "admin", resp.Role)
 	}
+	if resp.OrganizationName != "Acme" {
+		t.Fatalf("expected organization name %q, got %q", "Acme", resp.OrganizationName)
+	}
 	if resp.Token == "" {
 		t.Fatal("expected non-empty token")
 	}

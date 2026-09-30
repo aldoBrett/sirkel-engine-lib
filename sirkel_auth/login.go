@@ -18,6 +18,9 @@ type LoginResponse struct {
 	Token string `json:"token"`
 	Role  string `json:"role"`
 	Email string `json:"email"`
+	// OrganizationName is the name of the user's current organization, empty
+	// when they have none (e.g. a super_admin) or it has no name.
+	OrganizationName string `json:"organization_name"`
 }
 
 func (h *SirkelAuthHandler) Login(params LoginParams) (LoginResponse, error) {
@@ -26,11 +29,17 @@ func (h *SirkelAuthHandler) Login(params LoginParams) (LoginResponse, error) {
 	var passwordHash string
 	var role string
 	var emailVerifiedAt *time.Time
+	var organizationName string
 
-	query := `SELECT id, password_hash, role, email_verified_at, organization_id FROM sirkel_engine.users WHERE email=$1`
+	query := `
+		SELECT u.id, u.password_hash, u.role, u.email_verified_at, u.organization_id, COALESCE(o.name, '')
+		FROM sirkel_engine.users u
+		LEFT JOIN sirkel_engine.organizations o ON o.id = u.organization_id
+		WHERE u.email = $1
+	`
 
 	var organizationID uuid.UUID
-	err := h.Pool.QueryRow(context.Background(), query, params.Email).Scan(&userID, &passwordHash, &role, &emailVerifiedAt, &organizationID)
+	err := h.Pool.QueryRow(context.Background(), query, params.Email).Scan(&userID, &passwordHash, &role, &emailVerifiedAt, &organizationID, &organizationName)
 	if err != nil {
 		// Usamos un mensaje genérico para no revelar si el email existe o no
 		return LoginResponse{}, sirkel_errors.Wrap(sirkel_errors.CodeInvalidCredentials, "credenciales inválidas", err)
@@ -53,8 +62,9 @@ func (h *SirkelAuthHandler) Login(params LoginParams) (LoginResponse, error) {
 	}
 
 	return LoginResponse{
-		Token: t,
-		Role:  role,
-		Email: params.Email,
+		Token:            t,
+		Role:             role,
+		Email:            params.Email,
+		OrganizationName: organizationName,
 	}, nil
 }
