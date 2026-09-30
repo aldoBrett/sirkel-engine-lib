@@ -356,3 +356,69 @@ func TestTaskItemsRepositoryHandler_DeleteTaskItem(t *testing.T) {
 		t.Fatalf("expected task item to be deleted, got %+v", fetched)
 	}
 }
+
+func TestTaskItemsRepositoryHandler_SaveTaskItem_AcceptsMemberCurrentlyInAnotherOrganization(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	otherOrganizationID := createTestOrganization(t, pool)
+	member := createTestUser(t, pool, otherOrganizationID)
+	addTestMembership(t, pool, member.ID, organizationID, "user", false)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+	task := createTestTask(t, NewTasksRepositoryHandler(context.Background(), pool, nil), goal.ID)
+	handler := NewTaskItemsRepositoryHandler(context.Background(), pool, nil)
+
+	taskItem := &sirkel_domain.TaskItem{
+		ID:             testUUID(t),
+		TaskID:         task.ID,
+		Name:           "Bolt",
+		State:          sirkel_domain.TaskItemStatePending,
+		AssignedUserID: &member.ID,
+	}
+	if err := handler.SaveTaskItem(taskItem); err != nil {
+		t.Fatalf("SaveTaskItem() error = %v", err)
+	}
+}
+
+func TestTaskItemsRepositoryHandler_GetTaskItemsWithUsers_UsesMembershipInTaskOrganization(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	otherOrganizationID := createTestOrganization(t, pool)
+	creator := createTestUser(t, pool, organizationID)
+	// The assignee's current organization is another one, and their role here differs from their current role.
+	assignee := createTestUser(t, pool, otherOrganizationID)
+	addTestMembership(t, pool, assignee.ID, organizationID, "admin", false)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+	task := createTestTask(t, NewTasksRepositoryHandler(context.Background(), pool, nil), goal.ID)
+	handler := NewTaskItemsRepositoryHandler(context.Background(), pool, creator)
+
+	taskItem := &sirkel_domain.TaskItem{
+		ID:             testUUID(t),
+		TaskID:         task.ID,
+		Name:           "Bolt",
+		State:          sirkel_domain.TaskItemStatePending,
+		AssignedUserID: &assignee.ID,
+	}
+	if err := handler.SaveTaskItem(taskItem); err != nil {
+		t.Fatalf("SaveTaskItem() error = %v", err)
+	}
+
+	taskItems, err := handler.GetTaskItemsWithUsers(&GetTaskItemsParams{TaskID: &task.ID})
+	if err != nil {
+		t.Fatalf("GetTaskItemsWithUsers() error = %v", err)
+	}
+	if len(taskItems) != 1 {
+		t.Fatalf("expected 1 task item, got %d", len(taskItems))
+	}
+	got := taskItems[0]
+	if got.CreatedByUser == nil || got.CreatedByUser.ID != creator.ID || got.CreatedByUser.OrganizationID != organizationID || got.CreatedByUser.Role != "user" {
+		t.Fatalf("unexpected creator: %+v", got.CreatedByUser)
+	}
+	if got.AssignedUser == nil || got.AssignedUser.ID != assignee.ID {
+		t.Fatalf("unexpected assignee: %+v", got.AssignedUser)
+	}
+	if got.AssignedUser.OrganizationID != organizationID || got.AssignedUser.Role != "admin" {
+		t.Fatalf("expected assignee's membership in the task item's organization, got org %q role %q", got.AssignedUser.OrganizationID, got.AssignedUser.Role)
+	}
+}

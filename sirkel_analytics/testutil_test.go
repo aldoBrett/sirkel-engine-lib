@@ -149,8 +149,23 @@ func createTestUser(t *testing.T, pool *pgxpool.Pool, organizationID, email stri
 	if err != nil {
 		t.Fatalf("unable to create test user: %v", err)
 	}
+	addTestMembership(t, pool, user.ID, user.OrganizationID, user.Role, true)
 
 	return user
+}
+
+// addTestMembership gives a user a membership in an organization, mirroring what CreateUser and AddMembership write
+// to user_organizations. It does not touch users.organization_id/role.
+func addTestMembership(t *testing.T, pool *pgxpool.Pool, userID, organizationID, role string, isCurrent bool) {
+	t.Helper()
+
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO sirkel_engine.user_organizations (user_id, organization_id, role, is_current)
+		VALUES ($1, $2, $3, $4)
+	`, userID, organizationID, role, isCurrent)
+	if err != nil {
+		t.Fatalf("unable to create test membership: %v", err)
+	}
 }
 
 // tenant is an organization with a user acting in it, and the repositories used to fill it with data.

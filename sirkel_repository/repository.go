@@ -22,15 +22,17 @@ func actorID(user *sirkel_domain.User) *string {
 	return &user.ID
 }
 
+// userBelongsToGoalOrganization and userBelongsToTaskOrganization check membership, not the user's current
+// organization: a user who belongs to several organizations can be assigned work in any of them.
 func userBelongsToGoalOrganization(ctx context.Context, pool *pgxpool.Pool, userID, goalID string) error {
 	var belongs bool
 	err := pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
-			FROM sirkel_engine.users u
+			FROM sirkel_engine.user_organizations uo
 			JOIN sirkel_engine.goals g ON g.id = $2
 			JOIN sirkel_engine.projects p ON p.id = g.project_id
-			WHERE u.id = $1 AND u.organization_id = p.organization_id
+			WHERE uo.user_id = $1 AND uo.organization_id = p.organization_id
 		)
 	`, userID, goalID).Scan(&belongs)
 	if err != nil {
@@ -48,11 +50,11 @@ func userBelongsToTaskOrganization(ctx context.Context, pool *pgxpool.Pool, user
 	err := pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
-			FROM sirkel_engine.users u
+			FROM sirkel_engine.user_organizations uo
 			JOIN sirkel_engine.tasks t ON t.id = $2
 			JOIN sirkel_engine.goals g ON g.id = t.goal_id
 			JOIN sirkel_engine.projects p ON p.id = g.project_id
-			WHERE u.id = $1 AND u.organization_id = p.organization_id
+			WHERE uo.user_id = $1 AND uo.organization_id = p.organization_id
 		)
 	`, userID, taskID).Scan(&belongs)
 	if err != nil {

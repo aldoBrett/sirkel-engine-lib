@@ -335,15 +335,22 @@ func (h *TaskItemsRepositoryHandler) GetTaskItems(params *GetTaskItemsParams) ([
 }
 
 // taskItemWithUsersSelect resolves each task item's creator and assignee from sirkel_engine.users. Either join
-// misses when the task item has no such user recorded, or the recorded user no longer exists.
+// misses when the task item has no such user recorded, or the recorded user no longer exists. Their organization and
+// role are those of their membership in the task item's organization, not of whichever organization is current for
+// them, and come back empty when they no longer belong to it.
 const taskItemWithUsersSelect = `
 	SELECT
 		ti.id, ti.task_id, ti.name, ti.description, ti.state, ti.sort_key, ti.assigned_user_id, ti.created_by, ti.updated_by, ti.created_at, ti.updated_at,
-		creator.id, creator.organization_id, creator.email, creator.role, creator.name, creator.first_surname, creator.second_surname, creator.phone,
-		assignee.id, assignee.organization_id, assignee.email, assignee.role, assignee.name, assignee.first_surname, assignee.second_surname, assignee.phone
+		creator.id, creator_uo.organization_id, creator.email, creator_uo.role, creator.name, creator.first_surname, creator.second_surname, creator.phone,
+		assignee.id, assignee_uo.organization_id, assignee.email, assignee_uo.role, assignee.name, assignee.first_surname, assignee.second_surname, assignee.phone
 	FROM sirkel_engine.task_items ti
+	JOIN sirkel_engine.tasks t ON t.id = ti.task_id
+	JOIN sirkel_engine.goals g ON g.id = t.goal_id
+	JOIN sirkel_engine.projects p ON p.id = g.project_id
 	LEFT JOIN sirkel_engine.users creator ON creator.id = ti.created_by
+	LEFT JOIN sirkel_engine.user_organizations creator_uo ON creator_uo.user_id = creator.id AND creator_uo.organization_id = p.organization_id
 	LEFT JOIN sirkel_engine.users assignee ON assignee.id = ti.assigned_user_id
+	LEFT JOIN sirkel_engine.user_organizations assignee_uo ON assignee_uo.user_id = assignee.id AND assignee_uo.organization_id = p.organization_id
 	WHERE 1 = 1
 `
 

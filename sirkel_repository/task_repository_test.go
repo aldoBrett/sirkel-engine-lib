@@ -490,3 +490,25 @@ func TestTasksRepositoryHandler_DeleteTask(t *testing.T) {
 		t.Fatalf("expected task to be deleted, got %+v", fetched)
 	}
 }
+
+func TestTasksRepositoryHandler_SaveTask_AcceptsMemberCurrentlyInAnotherOrganization(t *testing.T) {
+	pool := testPool(t)
+	organizationID := createTestOrganization(t, pool)
+	otherOrganizationID := createTestOrganization(t, pool)
+	member := createTestUser(t, pool, otherOrganizationID)
+	addTestMembership(t, pool, member.ID, organizationID, "user", false)
+	project := createTestProject(t, NewProjectsRepositoryHandler(context.Background(), pool, nil), organizationID)
+	goal := createTestGoal(t, NewGoalsRepositoryHandler(context.Background(), pool, nil), project.ID)
+	handler := NewTasksRepositoryHandler(context.Background(), pool, nil)
+
+	task := &sirkel_domain.Task{
+		ID:                testUUID(t),
+		GoalID:            goal.ID,
+		Name:              "Assembly",
+		State:             sirkel_domain.TaskStateTodo,
+		ResponsibleUserID: &member.ID,
+	}
+	if err := handler.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask() error = %v", err)
+	}
+}

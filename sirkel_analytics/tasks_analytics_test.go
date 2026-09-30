@@ -401,7 +401,9 @@ func TestTasksAnalytics_GetUsersWorkload(t *testing.T) {
 	tn := newTenant(t, pool, "owner@a.test")
 	other := newTenant(t, pool, "owner@b.test")
 	alice := createTestUser(t, pool, tn.organizationID, "alice@a.test")
-	bob := createTestUser(t, pool, tn.organizationID, "bob@a.test")
+	// Bob's current organization is another one, but he still belongs to this one.
+	bob := createTestUser(t, pool, other.organizationID, "bob@a.test")
+	addTestMembership(t, pool, bob.ID, tn.organizationID, "user", false)
 
 	project := tn.project("A")
 	goalOne := tn.goal(project.ID, "One")
